@@ -10,10 +10,12 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
 	"github.com/danPoku/kaectx/internal/embed"
+	"github.com/danPoku/kaectx/internal/governance"
 	"github.com/danPoku/kaectx/internal/redact"
 )
 
@@ -37,6 +39,14 @@ type Result struct {
 	LastSeq   int
 	Score     float64
 	ScoreKind string
+	// Reliability and PolicyScore are populated by opt-in risk-aware search.
+	// GovernanceNeutral means there was too little outcome evidence to adjust
+	// this result; its multiplier is exactly 1.
+	Reliability         float64
+	PolicyScore         float64
+	GovernanceNeutral   bool
+	GovernanceEvaluated bool
+	OriginalRank        int
 }
 
 // BestResult reports what ran, not just the hits — callers (ctx search,
@@ -55,6 +65,10 @@ type BestResult struct {
 	// TelemetryErr never changes the search outcome. Retrieval is the product;
 	// measurement is an observer and must fail open.
 	TelemetryErr error
+	// GovernanceApplied is true only when the opt-in policy was evaluated
+	// successfully. GovernanceErr is fail-open and preserves the base order.
+	GovernanceApplied bool
+	GovernanceErr     error
 }
 
 // Best tries hybrid (keyword+semantic) search first, falling back to
@@ -90,6 +104,13 @@ func Best(ctx context.Context, db *sql.DB, client embed.Embedder, query string, 
 // or a future migration problem must never turn a successful search into a
 // failed one.
 func BestTracked(ctx context.Context, db *sql.DB, client embed.Embedder, query string, projectID int64, agent string, limit int, surface string) (BestResult, error) {
+	return BestTrackedWithPolicy(ctx, db, client, query, projectID, agent, limit, surface, false)
+}
+
+// BestTrackedWithPolicy optionally reranks results using explicit outcome
+// observations. The original rank is the utility baseline; reliability can
+// only discount it, and sparse evidence is exactly neutral.
+func BestTrackedWithPolicy(ctx context.Context, db *sql.DB, client embed.Embedder, query string, projectID int64, agent string, limit int, surface string, riskAware bool) (BestResult, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -98,10 +119,43 @@ func BestTracked(ctx context.Context, db *sql.DB, client embed.Embedder, query s
 	if err != nil {
 		return got, err
 	}
+	if riskAware {
+		got.GovernanceErr = applyGovernance(ctx, db, projectID, got.Results)
+		got.GovernanceApplied = got.GovernanceErr == nil
+	}
 	telemetryCtx, cancel := context.WithTimeout(context.Background(), telemetryWriteTimeout)
 	defer cancel()
 	got.RunID, got.TelemetryErr = recordRetrieval(telemetryCtx, db, query, projectID, agent, limit, surface, time.Since(started), got)
 	return got, nil
+}
+
+func applyGovernance(ctx context.Context, db *sql.DB, projectID int64, results []Result) error {
+	keys := make([]string, len(results))
+	for i := range results {
+		keys[i] = evidenceKey(results[i])
+	}
+	assessments, err := governance.AssessMany(ctx, db, projectID, keys)
+	if err != nil {
+		return err
+	}
+	// Build a complete copy first: assessment failures must leave both order
+	// and metadata untouched so fail-open telemetry remains truthful.
+	evaluated := append([]Result(nil), results...)
+	for i := range evaluated {
+		a := assessments[keys[i]]
+		evaluated[i].Reliability = a.Reliability
+		evaluated[i].GovernanceNeutral = a.Neutral
+		evaluated[i].GovernanceEvaluated = true
+		evaluated[i].OriginalRank = i + 1
+		// A positive rank-derived utility is comparable across BM25 and RRF,
+		// whose raw score directions and scales differ.
+		evaluated[i].PolicyScore = a.Reliability / float64(60+i+1)
+	}
+	sort.SliceStable(evaluated, func(i, j int) bool {
+		return evaluated[i].PolicyScore > evaluated[j].PolicyScore
+	})
+	copy(results, evaluated)
+	return nil
 }
 
 func recordRetrieval(ctx context.Context, db *sql.DB, query string, projectID int64, agent string, limit int, surface string, elapsed time.Duration, got BestResult) (string, error) {
@@ -133,8 +187,8 @@ func recordRetrieval(ctx context.Context, db *sql.DB, query string, projectID in
 	}
 	for i, r := range got.Results {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO retrieval_candidates
-			(run_id, rank, evidence_key, chunk_id, session_id, first_seq, last_seq, score, score_kind)
-			VALUES (?,?,?,?,?,?,?,?,?)`, runID, i+1, evidenceKey(r), r.ChunkID, r.SessionID, r.FirstSeq, r.LastSeq, r.Score, r.ScoreKind); err != nil {
+			(run_id, rank, evidence_key, chunk_id, session_id, first_seq, last_seq, score, score_kind, original_rank, policy_applied, reliability, policy_score, governance_neutral)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, runID, i+1, evidenceKey(r), nullableChunkID(r.ChunkID), r.SessionID, r.FirstSeq, r.LastSeq, r.Score, r.ScoreKind, nullableOriginalRank(r), r.GovernanceEvaluated, nullableReliability(r), nullablePolicyScore(r), nullableNeutral(r)); err != nil {
 			return "", err
 		}
 	}
@@ -156,6 +210,41 @@ func recordRetrieval(ctx context.Context, db *sql.DB, query string, projectID in
 		}
 	}
 	return runID, tx.Commit()
+}
+
+func nullableChunkID(id int64) any {
+	if id == 0 {
+		return nil
+	}
+	return id
+}
+
+func nullableOriginalRank(r Result) any {
+	if !r.GovernanceEvaluated {
+		return nil
+	}
+	return r.OriginalRank
+}
+
+func nullableReliability(r Result) any {
+	if !r.GovernanceEvaluated {
+		return nil
+	}
+	return r.Reliability
+}
+
+func nullablePolicyScore(r Result) any {
+	if !r.GovernanceEvaluated {
+		return nil
+	}
+	return r.PolicyScore
+}
+
+func nullableNeutral(r Result) any {
+	if !r.GovernanceEvaluated {
+		return nil
+	}
+	return r.GovernanceNeutral
 }
 
 func newRunID() (string, error) {

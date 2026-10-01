@@ -89,7 +89,7 @@ commands:
   init                                create ~/.ctx and its database
   ingest [--path FILE] [--agent A]    ingest sessions (default: scan Claude Code + Codex session dirs)
   embed [--batch N]                   embed pending chunks via a local Ollama for semantic search
-  search <query> [--agent A] [--limit N]   keyword+semantic search over ingested sessions in this project
+  search <query> [--agent A] [--limit N] [--risk-aware]   search ingested sessions in this project
   explain <path> [--limit N]          show sessions, actions and git span for a project-relative file
   repair git [--dry-run]              re-derive git commit spans and repo-root file paths for sessions ingested by older versions
   repair touches [--dry-run]          backfill file records for Codex apply_patch calls ingested before ctx read them
@@ -99,9 +99,9 @@ commands:
   daemon [--fallback-interval D]      watch session dirs continuously and ingest live (Ctrl+C to stop)`)
 }
 
-// reorderFlagsFirst hoists any token in args matching a name in
-// flagsWithValue (plus the value token right after it) to the front, in
-// place, leaving the rest as a trailing run of positional args.
+// reorderFlagsFirst hoists any actual flag token in args whose name appears
+// in flagsWithValue. A true map value means the following token belongs to
+// the flag; false represents a boolean flag.
 //
 // Go's flag package stops parsing at the first non-flag token, so
 // "ctx search some query --agent codex" would otherwise swallow "--agent
@@ -111,13 +111,18 @@ commands:
 func reorderFlagsFirst(args []string, flagsWithValue map[string]bool) []string {
 	var flags, positional []string
 	for i := 0; i < len(args); i++ {
+		if !strings.HasPrefix(args[i], "-") {
+			positional = append(positional, args[i])
+			continue
+		}
 		name, _, hasEquals := strings.Cut(strings.TrimLeft(args[i], "-"), "=")
-		if !flagsWithValue[name] {
+		takesValue, known := flagsWithValue[name]
+		if !known {
 			positional = append(positional, args[i])
 			continue
 		}
 		flags = append(flags, args[i])
-		if !hasEquals && i+1 < len(args) {
+		if takesValue && !hasEquals && i+1 < len(args) {
 			i++
 			flags = append(flags, args[i])
 		}

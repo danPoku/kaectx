@@ -14,9 +14,10 @@ import (
 const defaultSearchLimit = 10
 
 type searchContextArgs struct {
-	Query string `json:"query" jsonschema:"FTS5 keyword query (quote phrases, use AND/OR/NOT) to search across past coding-agent sessions in this project"`
-	Agent string `json:"agent,omitempty" jsonschema:"restrict to one agent's sessions, e.g. claude-code or codex (default: every agent)"`
-	Limit int    `json:"limit,omitempty" jsonschema:"max results, default 10"`
+	Query     string `json:"query" jsonschema:"FTS5 keyword query (quote phrases, use AND/OR/NOT) to search across past coding-agent sessions in this project"`
+	Agent     string `json:"agent,omitempty" jsonschema:"restrict to one agent's sessions, e.g. claude-code or codex (default: every agent)"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"max results, default 10"`
+	RiskAware bool   `json:"risk_aware,omitempty" jsonschema:"rerank using retrieval outcomes once evidence is credible (default false)"`
 }
 
 type searchContextHit struct {
@@ -29,8 +30,12 @@ type searchContextHit struct {
 	// FirstSeq..LastSeq is the message range of the matching exchange:
 	// get_session(session_id, from_seq=first_seq, to_seq=last_seq) reads
 	// just that, and get_chunk(chunk_id) returns its text directly.
-	FirstSeq int `json:"first_seq"`
-	LastSeq  int `json:"last_seq"`
+	FirstSeq          int     `json:"first_seq"`
+	LastSeq           int     `json:"last_seq"`
+	Reliability       float64 `json:"reliability,omitempty"`
+	PolicyScore       float64 `json:"policy_score,omitempty"`
+	GovernanceNeutral bool    `json:"governance_neutral,omitempty"`
+	OriginalRank      int     `json:"original_rank,omitempty"`
 }
 
 type searchContextResult struct {
@@ -44,6 +49,7 @@ type searchContextResult struct {
 	// up yet, or the local Ollama isn't reachable) — visible so an agent
 	// doesn't mistake a degraded result set for the real thing.
 	UsedSemanticSearch bool `json:"used_semantic_search"`
+	GovernanceApplied  bool `json:"governance_applied"`
 }
 
 type searchNotesArgs struct {
@@ -83,16 +89,18 @@ func (s *server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, args
 	if limit <= 0 {
 		limit = defaultSearchLimit
 	}
-	got, err := search.BestTracked(ctx, s.db, s.embedClient, args.Query, s.projectID, args.Agent, limit, "mcp")
+	got, err := search.BestTrackedWithPolicy(ctx, s.db, s.embedClient, args.Query, s.projectID, args.Agent, limit, "mcp", args.RiskAware)
 	if err != nil {
 		return nil, searchContextResult{}, err
 	}
-	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil}
+	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil, GovernanceApplied: got.GovernanceApplied}
 	for i, r := range got.Results {
 		out.Results[i] = searchContextHit{
 			ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent,
 			StartedAt: r.StartedAt, At: r.At, Snippet: r.Snippet,
 			FirstSeq: r.FirstSeq, LastSeq: r.LastSeq,
+			Reliability: r.Reliability, PolicyScore: r.PolicyScore, GovernanceNeutral: r.GovernanceNeutral,
+			OriginalRank: r.OriginalRank,
 		}
 	}
 	return nil, out, nil

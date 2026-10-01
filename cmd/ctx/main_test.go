@@ -13,13 +13,18 @@ import (
 )
 
 func TestReorderFlagsFirst(t *testing.T) {
-	flagsWithValue := map[string]bool{"agent": true, "limit": true}
+	flagsWithValue := map[string]bool{"agent": true, "limit": true, "risk-aware": false}
 
 	cases := []struct {
 		name string
 		in   []string
 		want []string
 	}{
+		{
+			name: "boolean flag after query does not consume a word",
+			in:   []string{"some", "query", "--risk-aware"},
+			want: []string{"--risk-aware", "some", "query"},
+		},
 		{
 			name: "flags already first pass through unchanged",
 			in:   []string{"--agent", "codex", "some", "query"},
@@ -44,6 +49,11 @@ func TestReorderFlagsFirst(t *testing.T) {
 			name: "a query word that happens to start with a dash is left alone",
 			in:   []string{"-foo", "bar"},
 			want: []string{"-foo", "bar"},
+		},
+		{
+			name: "bare words matching flag names remain query terms",
+			in:   []string{"risk-aware", "agent", "limit"},
+			want: []string{"risk-aware", "agent", "limit"},
 		},
 		{
 			name: "no flags at all",

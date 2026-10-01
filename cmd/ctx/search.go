@@ -15,20 +15,20 @@ import (
 	"github.com/danPoku/kaectx/internal/store"
 )
 
-// searchFlagsWithValue lists this command's flags that take a value, so
-// reorderFlagsFirst knows to keep each one paired with its following token
-// when it hoists them ahead of the query words.
-var searchFlagsWithValue = map[string]bool{"agent": true, "limit": true}
+// searchFlagsWithValue lists this command's flags and whether they take a
+// value, so reorderFlagsFirst can hoist them ahead of the query words.
+var searchFlagsWithValue = map[string]bool{"agent": true, "limit": true, "risk-aware": false}
 
 func runSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	agent := fs.String("agent", "", "restrict to one agent (default: all agents)")
 	limit := fs.Int("limit", 10, "max results")
+	riskAware := fs.Bool("risk-aware", false, "rerank using credible retrieval outcomes")
 	if err := fs.Parse(reorderFlagsFirst(args, searchFlagsWithValue)); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: ctx search <query> [--agent NAME] [--limit N]")
+		return fmt.Errorf("usage: ctx search <query> [--agent NAME] [--limit N] [--risk-aware]")
 	}
 	query := strings.Join(fs.Args(), " ")
 
@@ -51,7 +51,7 @@ func runSearch(args []string) error {
 	// its own — cheap to always offer a client here, since Hybrid only
 	// actually reaches Ollama if vec0 (and chunk_vectors) are usable at all.
 	client := embed.NewOllamaClient(embed.DefaultBaseURL, embed.DefaultModel)
-	got, err := search.BestTracked(context.Background(), db, client, query, projectID, *agent, *limit, "cli")
+	got, err := search.BestTrackedWithPolicy(context.Background(), db, client, query, projectID, *agent, *limit, "cli", *riskAware)
 	if err != nil {
 		return err
 	}
@@ -60,6 +60,9 @@ func runSearch(args []string) error {
 	}
 	if got.TelemetryErr != nil {
 		fmt.Fprintf(os.Stderr, "ctx search: warning: retrieval telemetry was not recorded: %v\n", got.TelemetryErr)
+	}
+	if got.GovernanceErr != nil {
+		fmt.Fprintf(os.Stderr, "ctx search: warning: risk-aware reranking was not applied: %v\n", got.GovernanceErr)
 	}
 	if len(got.Results) == 0 {
 		fmt.Println("no results")

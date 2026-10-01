@@ -103,6 +103,9 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := applySQLMigration(db, 7, "007_memory_observations.sql"); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := migrateRetrievalGovernance(db); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
 }
 
@@ -169,6 +172,17 @@ func migrateTouchRooted(db *sql.DB) error {
 // `ctx repair git`.
 func migrateCommitSource(db *sql.DB) error {
 	return addColumns(db, 5, "commit_source", "sessions", column{"commit_source", "TEXT"})
+}
+
+// migrateRetrievalGovernance is migration 008: it records the policy inputs
+// used for each candidate without changing the append-only run schema.
+func migrateRetrievalGovernance(db *sql.DB) error {
+	return addColumns(db, 8, "retrieval_governance", "retrieval_candidates",
+		column{"original_rank", "INTEGER"},
+		column{"policy_applied", "INTEGER NOT NULL DEFAULT 0"},
+		column{"reliability", "REAL"},
+		column{"policy_score", "REAL"},
+		column{"governance_neutral", "INTEGER"})
 }
 
 // addColumns is the shared shape of the ALTER-based migrations. It lives in
