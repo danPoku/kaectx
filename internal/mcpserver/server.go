@@ -49,5 +49,6 @@ func New(db *sql.DB, cwd string, embedClient embed.Embedder) (*mcp.Server, error
 	s.registerSessions(srv)
 	s.registerNotes(srv)
 	s.registerExplain(srv)
+	s.registerFeedback(srv)
 	return srv, nil
 }

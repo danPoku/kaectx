@@ -30,6 +30,7 @@ var expectedObjects = map[string]string{
 	"notes_fts":            "table",
 	"retrieval_runs":       "table",
 	"retrieval_candidates": "table",
+	"memory_observations":  "table",
 	"v_session_overview":   "view",
 }
 
@@ -162,9 +163,9 @@ func TestMigrateTwiceIsANoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	want := 5 // core, session_git, touch_rooted, commit_source, retrieval_telemetry
+	want := 6 // core, session_git, touch_rooted, commit_source, retrieval_telemetry, memory_observations
 	if first.VectorsLoaded {
-		want = 6
+		want = 7
 	}
 
 	var count int

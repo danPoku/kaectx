@@ -100,6 +100,9 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := applySQLMigration(db, 6, "006_retrieval_telemetry.sql"); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := applySQLMigration(db, 7, "007_memory_observations.sql"); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
 }
 
