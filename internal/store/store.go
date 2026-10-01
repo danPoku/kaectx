@@ -7,6 +7,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -96,7 +97,47 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := migrateCommitSource(db); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := applySQLMigration(db, 6, "006_retrieval_telemetry.sql"); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
+}
+
+// applySQLMigration executes a self-recording SQL migration once. The version
+// check happens again inside the write transaction so two ctx processes that
+// start together cannot both perform the migration work.
+func applySQLMigration(db *sql.DB, version int, file string) error {
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		return fmt.Errorf("open migration %03d connection: %w", version, err)
+	}
+	defer conn.Close()
+	// A deferred transaction can read an old snapshot and then fail with
+	// SQLITE_BUSY_SNAPSHOT when another process migrates first. Take the write
+	// reservation before checking the version so contenders serialize here.
+	if _, err := conn.ExecContext(context.Background(), `BEGIN IMMEDIATE`); err != nil {
+		return fmt.Errorf("begin migration %03d: %w", version, err)
+	}
+	defer conn.ExecContext(context.Background(), `ROLLBACK`)
+	var applied int
+	if err := conn.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM schema_migrations WHERE version = ?`, version).Scan(&applied); err != nil {
+		return fmt.Errorf("inspect migration %03d: %w", version, err)
+	}
+	if applied > 0 {
+		_, err := conn.ExecContext(context.Background(), `COMMIT`)
+		return err
+	}
+	body, err := migrations.FS.ReadFile(file)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", file, err)
+	}
+	if _, err := conn.ExecContext(context.Background(), string(body)); err != nil {
+		return fmt.Errorf("apply %s: %w", file, err)
+	}
+	if _, err := conn.ExecContext(context.Background(), `COMMIT`); err != nil {
+		return fmt.Errorf("commit migration %03d: %w", version, err)
+	}
+	return nil
 }
 
 type column struct{ name, decl string }

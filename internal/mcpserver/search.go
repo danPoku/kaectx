@@ -35,6 +35,10 @@ type searchContextHit struct {
 
 type searchContextResult struct {
 	Results []searchContextHit `json:"results"`
+	// RetrievalRunID can be passed to future feedback/outcome tools without
+	// exposing database rowids or relying on unstable chunk ids.
+	RetrievalRunID    string `json:"retrieval_run_id,omitempty"`
+	TelemetryRecorded bool   `json:"telemetry_recorded"`
 	// UsedSemanticSearch tells the caller whether this ran keyword+semantic
 	// fusion or fell back to keyword-only (no embedding worker has caught
 	// up yet, or the local Ollama isn't reachable) — visible so an agent
@@ -79,11 +83,11 @@ func (s *server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, args
 	if limit <= 0 {
 		limit = defaultSearchLimit
 	}
-	got, err := search.Best(ctx, s.db, s.embedClient, args.Query, s.projectID, args.Agent, limit)
+	got, err := search.BestTracked(ctx, s.db, s.embedClient, args.Query, s.projectID, args.Agent, limit, "mcp")
 	if err != nil {
 		return nil, searchContextResult{}, err
 	}
-	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid}
+	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil}
 	for i, r := range got.Results {
 		out.Results[i] = searchContextHit{
 			ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent,

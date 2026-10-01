@@ -117,7 +117,9 @@ func TestSearchContext(t *testing.T) {
 			Agent     string `json:"agent"`
 			Snippet   string `json:"snippet"`
 		} `json:"results"`
-		UsedSemanticSearch bool `json:"used_semantic_search"`
+		UsedSemanticSearch bool   `json:"used_semantic_search"`
+		RetrievalRunID     string `json:"retrieval_run_id"`
+		TelemetryRecorded  bool   `json:"telemetry_recorded"`
 	}
 	callTool(t, cs, "search_context", map[string]any{"query": "WAL"}, &out)
 
@@ -136,6 +138,12 @@ func TestSearchContext(t *testing.T) {
 	// just tested in isolation.
 	if out.UsedSemanticSearch {
 		t.Error("UsedSemanticSearch = true, want false (brokenEmbedder always fails)")
+	}
+	if out.RetrievalRunID == "" {
+		t.Error("RetrievalRunID is empty, want recorded telemetry")
+	}
+	if !out.TelemetryRecorded {
+		t.Error("TelemetryRecorded = false, want true")
 	}
 }
 

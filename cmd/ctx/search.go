@@ -51,12 +51,15 @@ func runSearch(args []string) error {
 	// its own — cheap to always offer a client here, since Hybrid only
 	// actually reaches Ollama if vec0 (and chunk_vectors) are usable at all.
 	client := embed.NewOllamaClient(embed.DefaultBaseURL, embed.DefaultModel)
-	got, err := search.Best(context.Background(), db, client, query, projectID, *agent, *limit)
+	got, err := search.BestTracked(context.Background(), db, client, query, projectID, *agent, *limit, "cli")
 	if err != nil {
 		return err
 	}
 	if got.FallbackReason != nil {
 		fmt.Fprintf(os.Stderr, "ctx search: semantic search unavailable, falling back to keyword-only: %v\n", got.FallbackReason)
+	}
+	if got.TelemetryErr != nil {
+		fmt.Fprintf(os.Stderr, "ctx search: warning: retrieval telemetry was not recorded: %v\n", got.TelemetryErr)
 	}
 	if len(got.Results) == 0 {
 		fmt.Println("no results")
