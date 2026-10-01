@@ -4,13 +4,31 @@
 package main
 
 import (
+	"database/sql"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/danPoku/kaectx/internal/doctor"
 	"github.com/danPoku/kaectx/internal/explain"
 	"github.com/danPoku/kaectx/internal/repair"
 )
+
+func TestFormatDoctor(t *testing.T) {
+	out := formatDoctor(doctor.Report{
+		ProjectName: "ctx", Sources: 2, SourcesWithErrors: 1,
+		LastIngestedAt: sql.NullString{String: "2026-09-30T12:00:00Z", Valid: true},
+		Sessions:       4, Messages: 20, Chunks: 8, PendingEmbeddings: 3,
+		UnassignedChunks: 1, RecentRetrievals: 10, RecentZeroResultRuns: 2,
+		RecentHybridRuns: 6, RecentPolicyRuns: 1, Outcomes: 3,
+		RetrievedEvidence: 4, ObservedEvidence: 2, CredibleEvidence: 1,
+	})
+	for _, want := range []string{"ctx doctor: ctx", "2 (1 with errors)", "4 / 20 / 8", "pending: 3", "10 (2 zero-result, 6 hybrid, 1 risk-aware)", "2 / 4 evidence keys (50.0%)", "1 / 1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
 
 func TestReorderFlagsFirst(t *testing.T) {
 	flagsWithValue := map[string]bool{"agent": true, "limit": true, "risk-aware": false}

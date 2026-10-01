@@ -63,6 +63,29 @@ func ResolveProject(db *sql.DB, cwd string) (int64, error) {
 	return id, nil
 }
 
+// LookupProject finds the project that owns cwd without registering a new
+// project or path. Read-only commands use it to avoid changing the catalogue
+// merely because they were invoked from a new checkout or unrelated folder.
+func LookupProject(db *sql.DB, cwd string) (int64, bool, error) {
+	cwd = filepath.Clean(cwd)
+	if id, ok, err := lookupByPathPrefix(db, cwd); err != nil || ok {
+		return id, ok, err
+	}
+	remote := normalizedOriginRemote(cwd)
+	if remote == "" {
+		return 0, false, nil
+	}
+	var id int64
+	err := db.QueryRow(`SELECT id FROM projects WHERE git_remote = ?`, remote).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return id, true, nil
+}
+
 func lookupByPathPrefix(db *sql.DB, cwd string) (int64, bool, error) {
 	rows, err := db.Query(`SELECT path, project_id FROM project_paths`)
 	if err != nil {
