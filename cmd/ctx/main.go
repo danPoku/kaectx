@@ -63,6 +63,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "ctx embed:", err)
 			os.Exit(1)
 		}
+	case "audit-secrets":
+		if err := runAuditSecrets(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "ctx audit-secrets:", err)
+			os.Exit(1)
+		}
 	case "daemon":
 		if err := runDaemon(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "ctx daemon:", err)
@@ -89,6 +94,7 @@ commands:
   repair git [--dry-run]              re-derive git commit spans and repo-root file paths for sessions ingested by older versions
   repair touches [--dry-run]          backfill file records for Codex apply_patch calls ingested before ctx read them
   project list | merge <from> <into>  list projects, or fold a duplicate (e.g. from a deleted checkout) into another
+  audit-secrets                       re-scan stored text with the redaction rules and report residual secrets
   mcp                                 serve ctx's tools over MCP (stdio) for an agent to call
   daemon [--fallback-interval D]      watch session dirs continuously and ingest live (Ctrl+C to stop)`)
 }
