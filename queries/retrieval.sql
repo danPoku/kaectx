@@ -319,10 +319,15 @@ SELECT n.id, n.kind, n.title, n.body, n.tags, n.agent, n.created_at
 
 
 -- name: PendingEmbeddings :many
--- The embed worker's to-do list.
+-- The embed worker's to-do list. Chunks of a session with no resolved project
+-- are excluded here rather than skipped by the worker: chunk_vectors.project_id
+-- is a partition key and cannot be NULL, and if they were selected they would
+-- fill the LIMIT window, so a batch made only of them would end the drain
+-- while embeddable chunks queued behind them were never reached.
 SELECT c.id, c.text, s.project_id, s.agent, c.session_id
   FROM chunks c
   JOIN sessions s ON s.id = c.session_id
  WHERE c.embedded_at IS NULL
+   AND s.project_id IS NOT NULL
  ORDER BY c.id
  LIMIT :limit;
