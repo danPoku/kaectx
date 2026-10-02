@@ -23,9 +23,10 @@ $ ctx search "how does the daemon embed new chunks in the background"
 ## Status
 
 Early. The current tagged release is v0.1.3; `master` includes unreleased
-work toward file-aware memory. It has been run on one machine, on Ubuntu
-under WSL2; other platforms are untested. Expect breaking changes in the 0.x
-series, including to the database schema and the MCP tool output. See
+work toward file-aware memory. Linux (including Ubuntu under WSL2) is the
+primary environment; native Windows is also supported and tested. Expect
+breaking changes in the 0.x series, including to the database schema and the
+MCP tool output. See
 [Limitations](#limitations) before relying on it.
 
 Articles written before this work describe the v0.1.3 feature set. They are still
@@ -86,6 +87,29 @@ go install -tags sqlite_fts5 ./cmd/ctx
 
 Either puts `ctx` in `$(go env GOPATH)/bin`. Make sure that directory is on your
 `PATH`.
+
+### Windows
+
+Windows is fully supported, but SQLite and sqlite-vec require cgo and a
+MinGW-w64 compiler. From a clone, the checked-in installer discovers an MSYS2
+UCRT64 or MinGW64 compiler, optionally runs the native test gate, creates a
+timestamped backup of the existing executable, and installs `ctx.exe` into the
+Go bin directory:
+
+```powershell
+winget install MSYS2.MSYS2
+C:\msys64\usr\bin\bash.exe -lc "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-gcc"
+
+git clone https://github.com/danPoku/kaectx
+cd kaectx
+.\scripts\install-windows.ps1 -RunTests
+```
+
+If an agent already has `ctx mcp` open, close that session first or add
+`-StopRunningCtx`; Windows does not replace a running executable. Native
+Windows stores its catalogue at `%USERPROFILE%\.ctx\ctx.db` and reads the
+Windows-native Claude Code and Codex logs. It is independent of a WSL
+installation and its `/home/<user>/.ctx/ctx.db`.
 
 ### macOS
 
@@ -310,8 +334,10 @@ way.
   exist yet. Ingest has been checked against logs from Claude Code 2.1.278 and
   codex-cli 0.153.0. These formats are undocumented and change without notice,
   so a new version can break an adapter.
-- kaectx reads logs on the machine it runs on. Under WSL that means agents have to
-  run inside WSL. Windows-native agents write to `C:\Users\…` and are not read.
+- kaectx reads logs from the environment where it runs. A native Windows
+  process reads Windows agent logs and `%USERPROFILE%\.ctx\ctx.db`; a Linux or
+  WSL process reads Linux agent logs and `~/.ctx/ctx.db`. The catalogues are
+  separate unless deliberately migrated.
 - File-touch tracking (`sessions_touching`, `explain_file`, `ctx explain`) covers
   Claude Code's Read, Edit, MultiEdit and Write tools and Codex's `apply_patch`.
   Other Codex tool calls and edits made through a shell command are not
@@ -343,13 +369,23 @@ way.
 
 ## Development
 
+Linux is the primary development environment:
+
 ```
 go vet -tags sqlite_fts5 ./...
 go test -tags sqlite_fts5 ./...
 ```
 
-`TestOllamaClientLive` talks to a real Ollama and needs `nomic-embed-text`
-pulled; the rest of the suite runs without it.
+For native Windows development, install the MSYS2 UCRT64 compiler once and use
+the installer to run the same test/vet gate and replace the local executable:
+
+```powershell
+.\scripts\install-windows.ps1 -RunTests -StopRunningCtx
+```
+
+Linux and Windows run as separate CI jobs. `TestOllamaClientLive` is excluded
+from the deterministic default suite; set `CTX_LIVE_OLLAMA=1` to run it against
+a real Ollama with `nomic-embed-text` pulled.
 
 Layout:
 

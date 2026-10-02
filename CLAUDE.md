@@ -9,9 +9,11 @@ Mental model: an insurer's head office. Branches (agents) keep filing claims
 their own way; head office collects, standardises, indexes, and answers queries.
 
 ## Environment
-- Windows 11 + WSL Ubuntu. Everything runs inside WSL.
-- DB lives at `~/.ctx/ctx.db` — NEVER under `/mnt/c` (SQLite locking across the
-  Windows boundary is unreliable).
+- Linux (including WSL Ubuntu) is the primary development and documentation
+  environment. Native Windows is also fully supported and tested.
+- Linux/WSL DB lives at `~/.ctx/ctx.db` — NEVER under `/mnt/c` (SQLite locking
+  across the Windows boundary is unreliable). Native Windows uses
+  `%USERPROFILE%\.ctx\ctx.db`; the two catalogues are independent.
 - Repo may also be opened in GitHub Codespaces: identify projects by normalised
   git remote, never by absolute path.
 
