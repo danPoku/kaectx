@@ -320,9 +320,13 @@ func processLine(db *sql.DB, adapter Adapter, git *store.GitResolver, line []byt
 	for _, ft := range msg.FileTouches {
 		path := ft.Path
 		path = git.ProjectPath(res.Session.CWD, path)
+		rooted := 0
+		if git.Root(res.Session.CWD) != "" {
+			rooted = 1
+		}
 		if _, err := db.Exec(`INSERT INTO file_touches(session_id, message_id, project_id, path, action, created_at, rooted)
-		                   VALUES (?,?,?,?,?,?,1)`,
-			sessionID, messageID, projectID, path, ft.Action, nullIfEmpty(msg.CreatedAt)); err != nil {
+		                   VALUES (?,?,?,?,?,?,?)`,
+			sessionID, messageID, projectID, path, ft.Action, nullIfEmpty(msg.CreatedAt), rooted); err != nil {
 			return sessionID, err
 		}
 	}

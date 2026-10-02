@@ -7,9 +7,31 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestProjectPathMapsWSLPathsToWindowsRepoRoot(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows host mapping test")
+	}
+	repo, _ := gitRepo(t, "2026-01-01T00:00:00Z")
+	repo = realDir(t, repo)
+	sub := filepath.Join(repo, "internal", "store")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toWSL := func(p string) string {
+		volume := filepath.VolumeName(p)
+		rest := strings.TrimPrefix(filepath.ToSlash(p[len(volume):]), "/")
+		return "/mnt/" + strings.ToLower(volume[:1]) + "/" + rest
+	}
+	got := NewGitResolver().ProjectPath(toWSL(sub), toWSL(filepath.Join(repo, "cmd", "main.go")))
+	if got != "cmd/main.go" {
+		t.Errorf("cross-host ProjectPath = %q, want cmd/main.go", got)
+	}
+}
 
 // gitRepo makes a repo with one empty commit per date and returns its dir
 // and the commit hashes, oldest first. Dates are fixed so the resolver's
