@@ -18,6 +18,8 @@ type searchContextArgs struct {
 	Agent     string `json:"agent,omitempty" jsonschema:"restrict to one agent's sessions, e.g. claude-code or codex (default: every agent)"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"max results, default 10"`
 	RiskAware bool   `json:"risk_aware,omitempty" jsonschema:"rerank using retrieval outcomes once evidence is credible (default false)"`
+	Since     string `json:"since,omitempty" jsonschema:"only turns at or after this time: a UTC date (2026-09-28) or RFC 3339 timestamp"`
+	Until     string `json:"until,omitempty" jsonschema:"only turns before this time; a date means through the end of that day (2026-10-04)"`
 }
 
 type searchContextHit struct {
@@ -50,6 +52,9 @@ type searchContextResult struct {
 	// doesn't mistake a degraded result set for the real thing.
 	UsedSemanticSearch bool `json:"used_semantic_search"`
 	GovernanceApplied  bool `json:"governance_applied"`
+	// Index says how current the searched index is; read its warning
+	// before concluding that something never happened.
+	Index *indexStatus `json:"index,omitempty"`
 }
 
 type searchNotesArgs struct {
@@ -75,7 +80,9 @@ func (s *server) registerSearch(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "search_context",
 		Description: "Keyword search over past coding-agent sessions in this project — across every agent that's been ingested (Claude Code, Codex, ...), not just the one calling this tool. " +
-			"Returns short snippets, not full transcripts. To read a hit, call get_chunk with its chunk_id (the matching exchange, ~1k tokens), or get_session with its session_id and from_seq/to_seq set to the hit's first_seq/last_seq.",
+			"Returns short snippets, not full transcripts. To read a hit, call get_chunk with its chunk_id (the matching exchange, ~1k tokens), or get_session with its session_id and from_seq/to_seq set to the hit's first_seq/last_seq. " +
+			"For questions about a period (\"what happened last week\"), set since/until: otherwise older, stronger matches outrank the period you asked about. " +
+			"If the result's index.warning is set, ctx has not read some recent logs yet; say so rather than concluding nothing happened.",
 	}, s.searchContext)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -89,11 +96,15 @@ func (s *server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, args
 	if limit <= 0 {
 		limit = defaultSearchLimit
 	}
-	got, err := search.BestTrackedWithPolicy(ctx, s.db, s.embedClient, args.Query, s.projectID, args.Agent, limit, "mcp", args.RiskAware)
+	w, err := search.ParseWindow(args.Since, args.Until)
 	if err != nil {
 		return nil, searchContextResult{}, err
 	}
-	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil, GovernanceApplied: got.GovernanceApplied}
+	got, err := search.BestTrackedIn(ctx, s.db, s.embedClient, args.Query, s.projectID, args.Agent, w, limit, "mcp", args.RiskAware)
+	if err != nil {
+		return nil, searchContextResult{}, err
+	}
+	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil, GovernanceApplied: got.GovernanceApplied, Index: s.indexStatus()}
 	for i, r := range got.Results {
 		out.Results[i] = searchContextHit{
 			ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent,

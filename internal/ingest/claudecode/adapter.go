@@ -26,6 +26,7 @@ package claudecode
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/danPoku/kaectx/internal/ingest"
 )
@@ -49,6 +50,10 @@ type line struct {
 	GitBranch string        `json:"gitBranch"`
 	Version   string        `json:"version"`
 	AITitle   string        `json:"aiTitle"`
+	// IsMeta marks a role=user line that Claude Code itself injected (a
+	// skill's instructions, a usage-limit notice, an image placeholder):
+	// not something the person typed.
+	IsMeta bool `json:"isMeta"`
 }
 
 type messageBlock struct {
@@ -123,7 +128,7 @@ func (a Adapter) parseConversational(l line, raw []byte) (ingest.ParseResult, er
 	var text string
 	if err := json.Unmarshal(l.Message.Content, &text); err == nil {
 		if l.Message.Role == "user" {
-			text = cleanUserText(text)
+			return ingest.ParseResult{Message: userMessage(l, raw, []string{text}), Session: upd}, nil
 		}
 		return ingest.ParseResult{
 			Message: &ingest.RawMessage{
@@ -141,18 +146,31 @@ func (a Adapter) parseConversational(l line, raw []byte) (ingest.ParseResult, er
 	if len(blocks) == 0 {
 		return ingest.ParseResult{Skip: true}, nil
 	}
-	// Observed real files always carry exactly one block per line. Take
-	// the first defensively rather than assume, so an unexpected shape
-	// degrades instead of crashing.
+
+	// A user prompt can span several blocks. The VS Code extension sends
+	// the open file and the selection as their own text blocks ahead of
+	// what the person typed, and attached images come as image blocks:
+	// real lines look like [ide_opened_file, prompt] or [text, image,
+	// text]. Reading only the first block stored the IDE notice and
+	// dropped the actual prompt, so every text block is read here.
+	if l.Message.Role == "user" {
+		if texts, ok := promptBlocks(blocks); ok {
+			if len(texts) == 0 {
+				return ingest.ParseResult{Skip: true}, nil // images only
+			}
+			return ingest.ParseResult{Message: userMessage(l, raw, texts), Session: upd}, nil
+		}
+	}
+
+	// Everything else (assistant output, tool results) was observed with
+	// exactly one block per line. Take the first defensively rather than
+	// assume, so an unexpected shape degrades instead of crashing.
 	b := blocks[0]
 
 	msg := &ingest.RawMessage{Raw: raw, CreatedAt: l.Timestamp}
 	switch b.Type {
 	case "text":
 		msg.Role, msg.Kind, msg.Content = l.Message.Role, "text", b.Text
-		if l.Message.Role == "user" {
-			msg.Content = cleanUserText(b.Text)
-		}
 	case "thinking":
 		msg.Role, msg.Kind, msg.Content = l.Message.Role, "thinking", b.Thinking
 	case "tool_use":
@@ -175,6 +193,50 @@ func (a Adapter) parseConversational(l line, raw []byte) (ingest.ParseResult, er
 		return ingest.ParseResult{Skip: true}, nil
 	}
 	return ingest.ParseResult{Message: msg, Session: upd}, nil
+}
+
+// promptBlocks returns the text of every text block when blocks are a
+// prompt (only text and image blocks). ok is false for any other mix, such
+// as a tool result, which the single-block path handles.
+func promptBlocks(blocks []contentBlock) (texts []string, ok bool) {
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			texts = append(texts, b.Text)
+		case "image":
+		default:
+			return nil, false
+		}
+	}
+	return texts, true
+}
+
+// userMessage builds the message for a role=user line from its text
+// blocks. Blocks the harness injected (see ingest.IsInjectedUserText) are
+// separated from what the person typed: if anything typed remains, the
+// message is that, as a user turn; if everything was injected, or Claude
+// Code flagged the whole line isMeta, it is stored as a system event. Either
+// way the raw line keeps every block.
+func userMessage(l line, raw []byte, texts []string) *ingest.RawMessage {
+	var typed, injected []string
+	for _, t := range texts {
+		t = cleanUserText(t)
+		if strings.TrimSpace(t) == "" {
+			continue
+		}
+		if l.IsMeta || ingest.IsInjectedUserText(t) {
+			injected = append(injected, t)
+		} else {
+			typed = append(typed, t)
+		}
+	}
+	msg := &ingest.RawMessage{Raw: raw, CreatedAt: l.Timestamp}
+	if len(typed) > 0 {
+		msg.Role, msg.Kind, msg.Content = "user", "text", strings.Join(typed, "\n\n")
+	} else {
+		msg.Role, msg.Kind, msg.Content = "system", "event", strings.Join(injected, "\n\n")
+	}
+	return msg
 }
 
 // fileTouchAction maps a tool name to file_touches.action. Confirmed against

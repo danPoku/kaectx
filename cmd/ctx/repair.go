@@ -11,10 +11,10 @@ import (
 	"github.com/danPoku/kaectx/internal/store"
 )
 
-const repairUsage = "usage: ctx repair git|touches [--dry-run]"
+const repairUsage = "usage: ctx repair git|touches|messages [--dry-run]"
 
 func runRepair(args []string) error {
-	if len(args) == 0 || (args[0] != "git" && args[0] != "touches") {
+	if len(args) == 0 || (args[0] != "git" && args[0] != "touches" && args[0] != "messages") {
 		return fmt.Errorf(repairUsage)
 	}
 	kind := args[0]
@@ -33,6 +33,15 @@ func runRepair(args []string) error {
 	}
 	defer db.Close()
 
+	if kind == "messages" {
+		res, err := repair.Messages(db, *dryRun)
+		if err != nil {
+			return err
+		}
+		fmt.Print(formatMessages(res, *dryRun))
+		return nil
+	}
+
 	git := store.NewGitResolver()
 	if kind == "touches" {
 		res, err := repair.Touches(db, git, *dryRun)
@@ -48,6 +57,28 @@ func runRepair(args []string) error {
 	}
 	fmt.Print(formatRepair(res, *dryRun))
 	return nil
+}
+
+func formatMessages(r repair.MessagesResult, dryRun bool) string {
+	verb := "changed"
+	if dryRun {
+		verb = "would change"
+	}
+	out := fmt.Sprintf("re-read %d user/system messages from their raw log lines\n", r.Examined)
+	out += fmt.Sprintf("messages: %s %d (%d reclassified as user turn or injected event, %d with recovered prompt text)\n",
+		verb, r.Reclassed+r.Recovered, r.Reclassed, r.Recovered)
+	if r.Expanded > 0 {
+		out += fmt.Sprintf("          plus %d injected events %s to keep all their blocks (no effect on search)\n", r.Expanded, verb)
+	}
+	if r.Unparseable > 0 {
+		out += fmt.Sprintf("          %d had nothing to re-read (empty prompts, or a raw line the adapter rejects); left as they were\n", r.Unparseable)
+	}
+	out += fmt.Sprintf("chunks:   rebuilt for %d sessions; new chunks are embedded by `ctx daemon` or `ctx embed`\n", r.Sessions)
+	out += fmt.Sprintf("titles:   %s %d\n", verb, r.Titled)
+	if dryRun {
+		out += "dry run: nothing was written\n"
+	}
+	return out
 }
 
 func formatTouches(r repair.TouchesResult, dryRun bool) string {

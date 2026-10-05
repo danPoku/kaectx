@@ -79,9 +79,14 @@ type BestResult struct {
 // gets full keyword search. client may be nil to skip straight to
 // keyword-only (e.g. a caller that already knows embeddings aren't set up).
 func Best(ctx context.Context, db *sql.DB, client embed.Embedder, query string, projectID int64, agent string, limit int) (BestResult, error) {
+	return BestIn(ctx, db, client, query, projectID, agent, Window{}, limit)
+}
+
+// BestIn is Best limited to turns inside w.
+func BestIn(ctx context.Context, db *sql.DB, client embed.Embedder, query string, projectID int64, agent string, w Window, limit int) (BestResult, error) {
 	var fallbackReason error
 	if client != nil {
-		hy, err := Hybrid(ctx, db, client, query, projectID, agent, limit)
+		hy, err := HybridIn(ctx, db, client, query, projectID, agent, w, limit)
 		if err == nil {
 			out := make([]Result, len(hy))
 			for i, r := range hy {
@@ -92,7 +97,7 @@ func Best(ctx context.Context, db *sql.DB, client embed.Embedder, query string, 
 		fallbackReason = err
 	}
 
-	kw, err := Keyword(db, query, projectID, agent, limit)
+	kw, err := KeywordIn(db, query, projectID, agent, w, limit)
 	if err != nil {
 		return BestResult{}, err
 	}
@@ -111,11 +116,16 @@ func BestTracked(ctx context.Context, db *sql.DB, client embed.Embedder, query s
 // observations. The original rank is the utility baseline; reliability can
 // only discount it, and sparse evidence is exactly neutral.
 func BestTrackedWithPolicy(ctx context.Context, db *sql.DB, client embed.Embedder, query string, projectID int64, agent string, limit int, surface string, riskAware bool) (BestResult, error) {
+	return BestTrackedIn(ctx, db, client, query, projectID, agent, Window{}, limit, surface, riskAware)
+}
+
+// BestTrackedIn is BestTrackedWithPolicy limited to turns inside w.
+func BestTrackedIn(ctx context.Context, db *sql.DB, client embed.Embedder, query string, projectID int64, agent string, w Window, limit int, surface string, riskAware bool) (BestResult, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 	started := time.Now()
-	got, err := Best(ctx, db, client, query, projectID, agent, limit)
+	got, err := BestIn(ctx, db, client, query, projectID, agent, w, limit)
 	if err != nil {
 		return got, err
 	}

@@ -8,6 +8,20 @@ import (
 	"strings"
 )
 
+// DBTX is what chunking needs from a connection: satisfied by both *sql.DB
+// (ingest) and *sql.Tx (repair, which rebuilds chunks inside one
+// transaction so an interrupted repair changes nothing).
+type DBTX interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// ChunkSession is chunkSession for callers outside this package. To rebuild
+// a session's chunks from scratch, delete them first: chunking resumes after
+// the last existing chunk.
+func ChunkSession(db DBTX, sessionID string) error { return chunkSession(db, sessionID) }
+
 type turnRow struct {
 	seq              int
 	role, kind, text string
@@ -30,7 +44,7 @@ type turnRow struct {
 // This makes chunking purely insert-only: no chunk is ever revised once
 // written, which is what keeps re-running ingest idempotent without extra
 // bookkeeping beyond "start after the last chunk's last_seq".
-func chunkSession(db *sql.DB, sessionID string) error {
+func chunkSession(db DBTX, sessionID string) error {
 	var startSeq int
 	if err := db.QueryRow(`SELECT COALESCE(MAX(last_seq) + 1, 0) FROM chunks WHERE session_id = ?`, sessionID).
 		Scan(&startSeq); err != nil {
@@ -100,7 +114,7 @@ func endsSettled(buf []turnRow) bool {
 	return false
 }
 
-func insertChunkIfQualifying(db *sql.DB, sessionID string, buf []turnRow) error {
+func insertChunkIfQualifying(db DBTX, sessionID string, buf []turnRow) error {
 	var parts []string
 	for _, r := range buf {
 		if r.kind != "text" {

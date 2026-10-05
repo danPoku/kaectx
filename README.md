@@ -146,8 +146,11 @@ ctx explain internal/auth.go      # shows past sessions that touched a file
 ```
 
 `ctx search` is scoped to the project that contains your current directory. Use
-`--agent claude-code` or `--agent codex` to restrict results to one agent, and
-`--limit N` to change how many come back.
+`--agent claude-code` or `--agent codex` to restrict results to one agent,
+`--limit N` to change how many come back, and `--since`/`--until` to search one
+period (`--since 2026-09-28 --until 2026-10-04`; a date as `--until` includes
+that whole day, dates are UTC). Equally good matches are listed newest first.
+If some session logs haven't been ingested yet, it says so on stderr.
 
 After upgrading from an older version, run these once (add `--dry-run` to see
 what they would do first). Both read only what is already in the database, are
@@ -155,6 +158,13 @@ safe to repeat, and run in a single transaction:
 
 - `ctx repair touches` rebuilds file records for Codex `apply_patch` calls
   ingested before ctx could read them, from the patch text already stored.
+- `ctx repair messages` re-reads user messages from their stored raw lines.
+  Older versions filed harness-injected text (task notifications, IDE context,
+  Codex environment snapshots, AGENTS.md) as if the person had typed it, kept
+  only the first block of a multi-part prompt, and left Codex sessions
+  untitled. This reclassifies those messages, rebuilds the affected sessions'
+  chunks (re-embedded by `ctx daemon` or `ctx embed`), and titles sessions
+  from their first typed prompt.
 - `ctx repair git` recomputes each session's git commit span from its own
   timestamps and rewrites older working-directory-relative file paths to be
   repo-root-relative. Rows whose directory no longer exists are retried on the
@@ -169,6 +179,14 @@ as `internal/store/store.go`.
 does a full rescan every five minutes in case a filesystem event was missed,
 and embeds new chunks every 30 seconds if Ollama is reachable. If Ollama is
 down it logs the error once and keeps ingesting.
+
+Without the daemon, `ctx mcp` closes most of the gap itself: it catches up on
+unread logs in the background when an agent starts it, and again when a search
+finds logs it hasn't read. `search_context` and `recent_sessions` report this
+in an `index` field, with a `warning` while logs are still unread, so an agent
+can say "ctx is behind" instead of "nothing happened". A lock file
+(`~/.ctx/ingest.lock`) keeps several MCP servers from catching up at once. The
+daemon is still the way to keep the index current between sessions.
 
 As a systemd user service:
 
@@ -228,10 +246,10 @@ a new chat.
 
 | Tool | What it does |
 | --- | --- |
-| `search_context` | Keyword plus semantic search over past sessions in this project, across all agents. Returns snippets centred on the match, each with the time of the turn and the message range (`first_seq`, `last_seq`) of the exchange it came from. |
+| `search_context` | Keyword plus semantic search over past sessions in this project, across all agents. Returns snippets centred on the match, each with the time of the turn and the message range (`first_seq`, `last_seq`) of the exchange it came from. `since`/`until` limit it to one period. |
 | `get_chunk` | Reads one search hit in full, the user turn and the assistant's reply (about 1k tokens), by `chunk_id`. |
 | `get_session` | Reads a session's messages in order. Conversation text only unless `include_tools` is set; capped by total characters (`max_chars`, default 20000) and by message length, with `next_from_seq` for paging. |
-| `recent_sessions` | Lists recent sessions, newest first. |
+| `recent_sessions` | Lists recent sessions, newest first; `since`/`until` list the sessions active in a period. |
 | `sessions_touching` | Sessions that read or edited a given file. |
 | `explain_file` | Builds a compact briefing for a file: sessions that touched it, actions, known git commit span, and chunk ids to open for the reasoning behind the work. |
 | `save_note` | Records a decision, gotcha, convention, todo, or fact. |
@@ -263,10 +281,10 @@ first_seq and last_seq rather than paging from the start.
 | `ctx init` | Create `~/.ctx` and the database. Other commands do this too if needed. |
 | `ctx ingest [--path FILE] [--agent A]` | One-shot ingest of the default directories, or of a single file. |
 | `ctx embed [--batch N]` | Embed pending chunks through Ollama. |
-| `ctx search <query> [--agent A] [--limit N]` | Search the current project. |
+| `ctx search <query> [--agent A] [--limit N] [--since D] [--until D]` | Search the current project. |
 | `ctx project list` | Show projects, their remotes, session counts and known paths. |
 | `ctx project merge <from> <into>` | Fold one project into another. |
-| `ctx mcp` | Serve MCP over stdio. |
+| `ctx mcp` | Serve MCP over stdio. Catches up on unread session logs in the background. |
 | `ctx daemon` | Ingest and embed continuously. |
 
 `ctx project merge` exists because a session whose working directory has since

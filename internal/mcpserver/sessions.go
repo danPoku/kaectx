@@ -11,6 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/danPoku/kaectx/internal/search"
 	"github.com/danPoku/kaectx/internal/store"
 	"github.com/danPoku/kaectx/queries"
 )
@@ -39,6 +40,8 @@ const (
 type recentSessionsArgs struct {
 	Agent string `json:"agent,omitempty" jsonschema:"restrict to one agent, e.g. claude-code or codex (default: every agent)"`
 	Limit int    `json:"limit,omitempty" jsonschema:"max sessions, default 20"`
+	Since string `json:"since,omitempty" jsonschema:"only sessions active at or after this time: a UTC date (2026-09-28) or RFC 3339 timestamp"`
+	Until string `json:"until,omitempty" jsonschema:"only sessions active before this time; a date means through the end of that day (2026-10-04)"`
 }
 
 type sessionOverview struct {
@@ -56,6 +59,8 @@ type sessionOverview struct {
 
 type recentSessionsResult struct {
 	Sessions []sessionOverview `json:"sessions"`
+	// Index: see searchContextResult.Index.
+	Index *indexStatus `json:"index,omitempty"`
 }
 
 type getSessionArgs struct {
@@ -110,7 +115,8 @@ type sessionsTouchingResult struct {
 func (s *server) registerSessions(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "recent_sessions",
-		Description: "List the most recent coding-agent sessions in this project, newest first. A summary view — use get_session to read one in full.",
+		Description: "List the most recent coding-agent sessions in this project, newest first. A summary view — use get_session to read one in full. " +
+			"Set since/until to list the sessions active in a period, e.g. one week. If index.warning is set, some recent sessions haven't been read yet.",
 	}, s.recentSessions)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -138,14 +144,19 @@ func (s *server) recentSessions(_ context.Context, _ *mcp.CallToolRequest, args 
 	if args.Agent != "" {
 		agentArg = args.Agent
 	}
-	rows, err := s.db.Query(sqlText,
-		sql.Named("project_id", s.projectID), sql.Named("agent", agentArg), sql.Named("limit", limit))
+	w, err := search.ParseWindow(args.Since, args.Until)
+	if err != nil {
+		return nil, recentSessionsResult{}, err
+	}
+	rows, err := s.db.Query(sqlText, append([]any{
+		sql.Named("project_id", s.projectID), sql.Named("agent", agentArg), sql.Named("limit", limit),
+	}, w.Args()...)...)
 	if err != nil {
 		return nil, recentSessionsResult{}, err
 	}
 	defer rows.Close()
 
-	var out recentSessionsResult
+	out := recentSessionsResult{Index: s.indexStatus()}
 	for rows.Next() {
 		// v_session_overview: id, agent, project_id, project, git_branch,
 		// title, summary, started_at, ended_at, message_count,
