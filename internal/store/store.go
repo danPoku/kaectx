@@ -109,6 +109,9 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := migrateRetrievalOpens(db); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := applySQLMigration(db, 10, "010_feedback_observer.sql"); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
 }
 

@@ -256,6 +256,8 @@ a new chat.
 | `search_notes` | Searches saved notes. |
 | `record_retrieval_outcome` | Labels retrieved evidence as helpful, unhelpful, stale, incorrect or superseded. Pass the exact search run ID and rank returned by `search_context` or `get_chunk`. |
 | `checkpoint_status` | Assesses the latest session's message count, elapsed span and file breadth. When a threshold is reached, the agent is instructed to offer a durable handoff and a fresh session; ctx never switches or ends the session automatically. Pass `session_id` to assess a specific session. |
+| `feedback_status` | Returns a bounded inbox of checkpoint decisions and opened retrievals that still need an explicit outcome. It identifies missing feedback; it does not guess whether context was helpful. |
+| `record_checkpoint_outcome` | Records whether the user started a new session, saved a handoff, continued, or dismissed a checkpoint recommendation. |
 
 Search returns snippets on purpose. An agent that wants the full exchange calls
 `get_chunk` with the hit's `chunk_id`, or `get_session` with the session id and
@@ -283,6 +285,20 @@ decisions, changed files, verification results, open risks and exact next action
 If the live session log has not been ingested yet, the result includes the same
 `index.warning` used by search and starts a background catch-up; the agent should
 retry after the warning clears before treating a healthy result as final.
+
+### Feedback observer
+
+At natural milestones, connected agents call `feedback_status`. Its inbox is
+derived from activity CTX already records: checkpoint recommendations without a
+decision and opened retrieval results without an outcome. Each nudge carries its
+source and confidence plus the exact session or retrieval run/rank needed to
+resolve it. This avoids a separate always-running helper and works with stdio MCP
+clients, which cannot receive unsolicited prompts reliably.
+
+The observer deliberately records no inferred helpful/unhelpful label. An open
+only proves that evidence was inspected, while a missing checkpoint decision
+only proves that CTX has not recorded the choice. Explicit outcome tools remain
+the boundary before evidence can influence reliability or retrieval policy.
 
 ### Getting agents to use `get_chunk`
 
