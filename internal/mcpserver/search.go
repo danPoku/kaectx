@@ -23,6 +23,7 @@ type searchContextArgs struct {
 }
 
 type searchContextHit struct {
+	Rank      int    `json:"rank"`
 	ChunkID   int64  `json:"chunk_id"`
 	SessionID string `json:"session_id"`
 	Agent     string `json:"agent"`
@@ -107,7 +108,7 @@ func (s *server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, args
 	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil, GovernanceApplied: got.GovernanceApplied, Index: s.indexStatus()}
 	for i, r := range got.Results {
 		out.Results[i] = searchContextHit{
-			ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent,
+			Rank: i + 1, ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent,
 			StartedAt: r.StartedAt, At: r.At, Snippet: r.Snippet,
 			FirstSeq: r.FirstSeq, LastSeq: r.LastSeq,
 			Reliability: r.Reliability, PolicyScore: r.PolicyScore, GovernanceNeutral: r.GovernanceNeutral,

@@ -112,6 +112,7 @@ func TestSearchContext(t *testing.T) {
 
 	var out struct {
 		Results []struct {
+			Rank      int    `json:"rank"`
 			ChunkID   int64  `json:"chunk_id"`
 			SessionID string `json:"session_id"`
 			Agent     string `json:"agent"`
@@ -128,6 +129,9 @@ func TestSearchContext(t *testing.T) {
 	}
 	if out.Results[0].Agent != "claude-code" {
 		t.Errorf("Agent = %q, want claude-code", out.Results[0].Agent)
+	}
+	if out.Results[0].Rank != 1 {
+		t.Errorf("Rank = %d, want 1", out.Results[0].Rank)
 	}
 	if !strings.Contains(out.Results[0].Snippet, "WAL") {
 		t.Errorf("Snippet = %q, want it to contain WAL", out.Results[0].Snippet)
@@ -208,6 +212,17 @@ func TestRecordRetrievalOutcomeUsesRunAndRank(t *testing.T) {
 	}
 	if runID.Valid || rank.Valid || evidence == "" {
 		t.Errorf("pruned observation = run %v rank %v evidence %q", runID, rank, evidence)
+	}
+}
+
+func TestRecordRetrievalOutcomeRequiresExactTarget(t *testing.T) {
+	cs, _ := testServer(t)
+	res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{
+		Name:      "record_retrieval_outcome",
+		Arguments: map[string]any{"chunk_id": 1, "outcome": "helpful"},
+	})
+	if err == nil && !res.IsError {
+		t.Fatal("chunk-only outcome succeeded, want an exact-target error")
 	}
 }
 
@@ -498,8 +513,10 @@ func TestGetChunk(t *testing.T) {
 	cs, db := testServer(t)
 
 	var hit struct {
-		Results []struct {
+		RetrievalRunID string `json:"retrieval_run_id"`
+		Results        []struct {
 			ChunkID int64 `json:"chunk_id"`
+			Rank    int   `json:"rank"`
 		} `json:"results"`
 	}
 	callTool(t, cs, "search_context", map[string]any{"query": "WAL"}, &hit)
@@ -508,14 +525,23 @@ func TestGetChunk(t *testing.T) {
 	}
 
 	var out struct {
-		ChunkID   int64  `json:"chunk_id"`
-		SessionID string `json:"session_id"`
-		Agent     string `json:"agent"`
-		FirstSeq  int    `json:"first_seq"`
-		LastSeq   int    `json:"last_seq"`
-		Text      string `json:"text"`
+		ChunkID        int64  `json:"chunk_id"`
+		SessionID      string `json:"session_id"`
+		Agent          string `json:"agent"`
+		FirstSeq       int    `json:"first_seq"`
+		LastSeq        int    `json:"last_seq"`
+		Text           string `json:"text"`
+		OpenRecorded   bool   `json:"open_recorded"`
+		FeedbackTarget *struct {
+			RunID string `json:"run_id"`
+			Rank  int    `json:"rank"`
+		} `json:"feedback_target"`
 	}
-	callTool(t, cs, "get_chunk", map[string]any{"chunk_id": hit.Results[0].ChunkID}, &out)
+	callTool(t, cs, "get_chunk", map[string]any{
+		"chunk_id": hit.Results[0].ChunkID,
+		"run_id":   hit.RetrievalRunID,
+		"rank":     hit.Results[0].Rank,
+	}, &out)
 	if out.SessionID != "claude-code:sess-1" || out.Agent != "claude-code" {
 		t.Errorf("session/agent = %q/%q", out.SessionID, out.Agent)
 	}
@@ -523,6 +549,53 @@ func TestGetChunk(t *testing.T) {
 		!strings.Contains(out.Text, "Assistant: Open it with a DSN") {
 		t.Errorf("Text = %q, want the user turn AND the assistant reply", out.Text)
 	}
+	if !out.OpenRecorded || out.FeedbackTarget == nil || out.FeedbackTarget.RunID != hit.RetrievalRunID || out.FeedbackTarget.Rank != 1 {
+		t.Fatalf("feedback target = %+v, want the search run at rank 1", out.FeedbackTarget)
+	}
+	var openedAt sql.NullString
+	var openCount int
+	if err := db.QueryRow(`SELECT opened_at,open_count FROM retrieval_candidates
+		WHERE run_id=? AND rank=?`, out.FeedbackTarget.RunID, out.FeedbackTarget.Rank).Scan(&openedAt, &openCount); err != nil {
+		t.Fatal(err)
+	}
+	if !openedAt.Valid || openCount != 1 {
+		t.Errorf("open telemetry = %v count %d, want timestamp and count 1", openedAt, openCount)
+	}
+
+	t.Run("direct read is untracked", func(t *testing.T) {
+		var direct struct {
+			Text           string `json:"text"`
+			OpenRecorded   bool   `json:"open_recorded"`
+			FeedbackTarget *struct {
+				RunID string `json:"run_id"`
+				Rank  int    `json:"rank"`
+			} `json:"feedback_target"`
+		}
+		callTool(t, cs, "get_chunk", map[string]any{"chunk_id": hit.Results[0].ChunkID}, &direct)
+		if direct.Text == "" || direct.OpenRecorded || direct.FeedbackTarget != nil {
+			t.Fatalf("direct read = %+v, want content without attribution", direct)
+		}
+	})
+
+	t.Run("telemetry failure does not hide the chunk", func(t *testing.T) {
+		if _, err := db.Exec(`CREATE TRIGGER fail_open_telemetry BEFORE UPDATE OF open_count
+			ON retrieval_candidates BEGIN SELECT RAISE(ABORT, 'telemetry unavailable'); END`); err != nil {
+			t.Fatal(err)
+		}
+		defer db.Exec(`DROP TRIGGER fail_open_telemetry`)
+		var got struct {
+			Text         string `json:"text"`
+			OpenRecorded bool   `json:"open_recorded"`
+		}
+		callTool(t, cs, "get_chunk", map[string]any{
+			"chunk_id": hit.Results[0].ChunkID,
+			"run_id":   hit.RetrievalRunID,
+			"rank":     hit.Results[0].Rank,
+		}, &got)
+		if got.Text == "" || got.OpenRecorded {
+			t.Fatalf("telemetry failure result = %+v, want readable unrecorded chunk", got)
+		}
+	})
 
 	t.Run("unknown id is a tool error", func(t *testing.T) {
 		res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "get_chunk", Arguments: map[string]any{"chunk_id": 999999}})
