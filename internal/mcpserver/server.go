@@ -70,12 +70,15 @@ func NewWithOptions(db *sql.DB, cwd string, embedClient embed.Embedder, opts Opt
 		s.startCatchUp()
 	}
 
-	srv := mcp.NewServer(&mcp.Implementation{Name: "ctx", Version: "0.1.3+dev"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "ctx", Version: "0.1.3+dev"}, &mcp.ServerOptions{
+		Instructions: "Use ctx to recover prior work without loading whole transcripts. At natural milestones, and whenever a session feels long or starts repeating context, call checkpoint_status. If it recommends a checkpoint, tell the user and offer to save a handoff before continuing in a fresh session; never end or replace the session without the user's choice.",
+	})
 	s.registerSearch(srv)
 	s.registerChunk(srv)
 	s.registerSessions(srv)
 	s.registerNotes(srv)
 	s.registerExplain(srv)
 	s.registerFeedback(srv)
+	s.registerCheckpoint(srv)
 	return srv, nil
 }
