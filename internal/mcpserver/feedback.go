@@ -15,8 +15,8 @@ import (
 )
 
 type recordOutcomeArgs struct {
-	RunID   string `json:"run_id" jsonschema:"retrieval_run_id returned by search_context"`
-	Rank    int    `json:"rank" jsonschema:"1-based rank of the result being assessed"`
+	RunID   string `json:"run_id" jsonschema:"retrieval_run_id returned by search_context or get_chunk"`
+	Rank    int    `json:"rank" jsonschema:"1-based result rank returned by search_context or get_chunk"`
 	Outcome string `json:"outcome" jsonschema:"one of helpful, unhelpful, stale, incorrect, superseded"`
 	Note    string `json:"note,omitempty" jsonschema:"optional explanation; secrets are redacted before storage"`
 }
@@ -37,13 +37,16 @@ var validOutcomes = map[string]bool{
 func (s *server) registerFeedback(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "record_retrieval_outcome",
-		Description: "Record whether a search_context result was helpful, unhelpful, stale, incorrect, or superseded. Use the retrieval_run_id and 1-based result rank returned by search_context. This evidence is measured first and does not yet alter ranking.",
+		Description: "Record whether retrieved context was helpful, unhelpful, stale, incorrect, or superseded once its usefulness is known. Use the exact run_id and rank returned by search_context or get_chunk. Record the honest result even when negative. Opening is tracked separately and never counts as helpful.",
 	}, s.recordRetrievalOutcome)
 }
 
 func (s *server) recordRetrievalOutcome(_ context.Context, _ *mcp.CallToolRequest, args recordOutcomeArgs) (*mcp.CallToolResult, recordOutcomeResult, error) {
-	if args.RunID == "" || args.Rank <= 0 || !validOutcomes[args.Outcome] {
-		return nil, recordOutcomeResult{}, fmt.Errorf("run_id, positive rank, and a valid outcome are required")
+	if !validOutcomes[args.Outcome] {
+		return nil, recordOutcomeResult{}, fmt.Errorf("a valid outcome is required")
+	}
+	if args.RunID == "" || args.Rank <= 0 {
+		return nil, recordOutcomeResult{}, fmt.Errorf("run_id and a positive rank are required")
 	}
 	var evidenceKey string
 	err := s.db.QueryRow(`SELECT rc.evidence_key

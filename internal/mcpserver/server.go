@@ -70,7 +70,9 @@ func NewWithOptions(db *sql.DB, cwd string, embedClient embed.Embedder, opts Opt
 		s.startCatchUp()
 	}
 
-	srv := mcp.NewServer(&mcp.Implementation{Name: "ctx", Version: "0.1.3+dev"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "ctx", Version: "0.1.3+dev"}, &mcp.ServerOptions{
+		Instructions: "Use search_context then get_chunk for the smallest useful context. Pass get_chunk the retrieval_run_id and the hit's rank so the exact open is recorded. When retrieved context influences an answer or action, call record_retrieval_outcome with that run_id and rank and an honest outcome: helpful, unhelpful, stale, incorrect, or superseded. Opening a result is recorded separately and is never treated as a helpful label.",
+	})
 	s.registerSearch(srv)
 	s.registerChunk(srv)
 	s.registerSessions(srv)

@@ -26,6 +26,8 @@ type Report struct {
 	RecentZeroResultRuns int
 	RecentHybridRuns     int
 	RecentPolicyRuns     int
+	RecentOpenedResults  int
+	RecentLabelledOpens  int
 	Outcomes             int
 	RetrievedEvidence    int
 	ObservedEvidence     int
@@ -79,6 +81,18 @@ func Collect(ctx context.Context, db *sql.DB, projectID int64) (Report, error) {
 		WHERE project_id=? AND created_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')`, projectID).
 		Scan(&r.RecentRetrievals, &r.RecentZeroResultRuns, &r.RecentHybridRuns, &r.RecentPolicyRuns); err != nil {
 		return r, fmt.Errorf("read retrieval health: %w", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT
+		COUNT(*),
+		COALESCE(SUM(CASE WHEN EXISTS (
+			SELECT 1 FROM memory_observations mo
+			WHERE mo.run_id=rc.run_id AND mo.candidate_rank=rc.rank
+		) THEN 1 ELSE 0 END),0)
+		FROM retrieval_candidates rc JOIN retrieval_runs rr ON rr.id=rc.run_id
+		WHERE rr.project_id=? AND rc.opened_at IS NOT NULL
+		AND rc.opened_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')`, projectID).
+		Scan(&r.RecentOpenedResults, &r.RecentLabelledOpens); err != nil {
+		return r, fmt.Errorf("read retrieval feedback funnel: %w", err)
 	}
 	if err := db.QueryRowContext(ctx, `WITH retrieved AS (
 		SELECT DISTINCT rc.evidence_key FROM retrieval_candidates rc

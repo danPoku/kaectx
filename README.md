@@ -247,17 +247,25 @@ a new chat.
 | Tool | What it does |
 | --- | --- |
 | `search_context` | Keyword plus semantic search over past sessions in this project, across all agents. Returns snippets centred on the match, each with the time of the turn and the message range (`first_seq`, `last_seq`) of the exchange it came from. `since`/`until` limit it to one period. |
-| `get_chunk` | Reads one search hit in full, the user turn and the assistant's reply (about 1k tokens), by `chunk_id`. |
+| `get_chunk` | Reads one search hit in full, the user turn and the assistant's reply (about 1k tokens), by `chunk_id`. Pass the search run ID and hit rank to record the exact result as opened. |
 | `get_session` | Reads a session's messages in order. Conversation text only unless `include_tools` is set; capped by total characters (`max_chars`, default 20000) and by message length, with `next_from_seq` for paging. |
 | `recent_sessions` | Lists recent sessions, newest first; `since`/`until` list the sessions active in a period. |
 | `sessions_touching` | Sessions that read or edited a given file. |
 | `explain_file` | Builds a compact briefing for a file: sessions that touched it, actions, known git commit span, and chunk ids to open for the reasoning behind the work. |
 | `save_note` | Records a decision, gotcha, convention, todo, or fact. |
 | `search_notes` | Searches saved notes. |
+| `record_retrieval_outcome` | Labels retrieved evidence as helpful, unhelpful, stale, incorrect or superseded. Pass the exact search run ID and rank returned by `search_context` or `get_chunk`. |
 
 Search returns snippets on purpose. An agent that wants the full exchange calls
 `get_chunk` with the hit's `chunk_id`, or `get_session` with the session id and
 the hit's `first_seq` and `last_seq`.
+
+Opening a search hit is recorded separately from its outcome. An open means the
+agent inspected the evidence; it does not mean the evidence was correct or
+useful. Once the agent knows whether the context influenced its answer or work,
+it calls `record_retrieval_outcome` with that search run ID and rank. `ctx doctor` reports the
+seven-day funnel from opened results to explicit labels, making missing feedback
+visible instead of silently leaving risk-aware retrieval neutral.
 
 ### Getting agents to use `get_chunk`
 

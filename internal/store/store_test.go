@@ -163,9 +163,9 @@ func TestMigrateTwiceIsANoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	want := 7 // core, session_git, touch_rooted, commit_source, retrieval telemetry/outcomes/governance
+	want := 8 // core, session_git, touch_rooted, commit_source, retrieval telemetry/outcomes/governance/opens
 	if first.VectorsLoaded {
-		want = 8
+		want = 9
 	}
 
 	var count int
@@ -189,6 +189,36 @@ func TestMigrateTwiceIsANoOp(t *testing.T) {
 	}
 	if count != want {
 		t.Errorf("schema_migrations has %d rows after second Migrate, want %d (idempotent)", count, want)
+	}
+}
+
+func TestMigrateRetrievalOpensRecoversPartialSchema(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := db.Exec(`CREATE TABLE schema_migrations (
+		version INTEGER PRIMARY KEY,
+		name TEXT NOT NULL
+	) STRICT;
+	CREATE TABLE retrieval_candidates (
+		run_id TEXT NOT NULL,
+		rank INTEGER NOT NULL,
+		opened_at TEXT
+	) STRICT;`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateRetrievalOpens(db); err != nil {
+		t.Fatalf("migrateRetrievalOpens: %v", err)
+	}
+	var columns int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('retrieval_candidates')
+		WHERE name IN ('opened_at','open_count')`).Scan(&columns); err != nil {
+		t.Fatal(err)
+	}
+	var migrations int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version=9`).Scan(&migrations); err != nil {
+		t.Fatal(err)
+	}
+	if columns != 2 || migrations != 1 {
+		t.Fatalf("columns=%d migration rows=%d, want 2 and 1", columns, migrations)
 	}
 }
 

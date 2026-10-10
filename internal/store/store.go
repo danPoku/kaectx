@@ -106,6 +106,9 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := migrateRetrievalGovernance(db); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := migrateRetrievalOpens(db); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
 }
 
@@ -183,6 +186,14 @@ func migrateRetrievalGovernance(db *sql.DB) error {
 		column{"reliability", "REAL"},
 		column{"policy_score", "REAL"},
 		column{"governance_neutral", "INTEGER"})
+}
+
+// migrateRetrievalOpens is migration 009: opened_at and open_count measure
+// selection separately from an explicit helpful or harmful outcome.
+func migrateRetrievalOpens(db *sql.DB) error {
+	return addColumns(db, 9, "retrieval_opens", "retrieval_candidates",
+		column{"opened_at", "TEXT"},
+		column{"open_count", "INTEGER NOT NULL DEFAULT 0"})
 }
 
 // addColumns is the shared shape of the ALTER-based migrations. It lives in

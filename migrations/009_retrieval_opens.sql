@@ -1,0 +1,8 @@
+-- Migration 009: distinguish a result being opened from it being judged.
+--
+-- Opening is behavioural evidence that a candidate was selected for closer
+-- inspection. It is not a helpful label: only explicit feedback belongs in
+-- memory_observations and may affect actuarial credibility.
+--
+-- SQLite has no ADD COLUMN IF NOT EXISTS, so store.migrateRetrievalOpens
+-- applies these columns idempotently and records schema migration 009.

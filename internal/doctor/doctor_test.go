@@ -67,6 +67,9 @@ func TestCollectReportsCorpusAndRetrievalHealth(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := db.Exec(`UPDATE retrieval_candidates SET opened_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE run_id IN ('r1','r2')`); err != nil {
+		t.Fatal(err)
+	}
 
 	r, err := doctor.Collect(context.Background(), db, projectID)
 	if err != nil {
@@ -83,6 +86,9 @@ func TestCollectReportsCorpusAndRetrievalHealth(t *testing.T) {
 	}
 	if r.Outcomes != 3 || r.RetrievedEvidence != 1 || r.ObservedEvidence != 1 || r.CredibleEvidence != 1 || r.OutcomeCoverage() != 100 {
 		t.Errorf("outcome report = %+v", r)
+	}
+	if r.RecentOpenedResults != 2 || r.RecentLabelledOpens != 2 {
+		t.Errorf("feedback funnel = %+v", r)
 	}
 }
 
