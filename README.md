@@ -255,6 +255,7 @@ a new chat.
 | `save_note` | Records a decision, gotcha, convention, todo, or fact. |
 | `search_notes` | Searches saved notes. |
 | `record_retrieval_outcome` | Labels retrieved evidence as helpful, unhelpful, stale, incorrect or superseded. Pass the exact search run ID and rank returned by `search_context` or `get_chunk`. |
+| `checkpoint_status` | Assesses the latest session's message count, elapsed span and file breadth. When a threshold is reached, the agent is instructed to offer a durable handoff and a fresh session; ctx never switches or ends the session automatically. Pass `session_id` to assess a specific session. |
 
 Search returns snippets on purpose. An agent that wants the full exchange calls
 `get_chunk` with the hit's `chunk_id`, or `get_session` with the session id and
@@ -266,6 +267,22 @@ useful. Once the agent knows whether the context influenced its answer or work,
 it calls `record_retrieval_outcome` with that search run ID and rank. `ctx doctor` reports the
 seven-day funnel from opened results to explicit labels, making missing feedback
 visible instead of silently leaving risk-aware retrieval neutral.
+
+### Checkpoint signals
+
+Ctx asks connected agents to call `checkpoint_status` at natural milestones and
+when a session becomes long or repetitive. The tool recommends a checkpoint at
+400 messages, a four-hour session span, or 25 changed files. It strengthens the
+recommendation when two signals fire, or when a session reaches 800 messages,
+eight hours, or 40 files.
+
+The signal is advisory. The agent should explain why it fired and offer three
+choices: save a handoff and continue in a new session, save without switching,
+or dismiss until the next milestone. A handoff should preserve the objective,
+decisions, changed files, verification results, open risks and exact next action.
+If the live session log has not been ingested yet, the result includes the same
+`index.warning` used by search and starts a background catch-up; the agent should
+retry after the warning clears before treating a healthy result as final.
 
 ### Getting agents to use `get_chunk`
 
