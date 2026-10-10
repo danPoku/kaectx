@@ -6,6 +6,7 @@ package mcpserver
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -115,6 +116,29 @@ func (s *server) checkpointStatus(_ context.Context, _ *mcp.CallToolRequest, arg
 	if urgent || len(out.Reasons) >= 2 {
 		out.Level = "checkpoint_strongly_recommended"
 		out.Recommendation = "Recommend saving a handoff now and continuing in a fresh session; let the user choose whether to switch, save only, or dismiss until the next milestone."
+	}
+	if out.ShouldSignal {
+		reasons, err := json.Marshal(out.Reasons)
+		if err != nil {
+			return nil, checkpointResult{}, fmt.Errorf("encode checkpoint reasons: %w", err)
+		}
+		if _, err := s.db.Exec(`INSERT INTO checkpoint_observations
+			(session_id,project_id,level,message_count,duration_minutes,files_changed,reasons)
+			VALUES (?,?,?,?,?,?,?)
+			ON CONFLICT(session_id) DO UPDATE SET
+				level=excluded.level, message_count=excluded.message_count,
+				duration_minutes=excluded.duration_minutes, files_changed=excluded.files_changed,
+				reasons=excluded.reasons,
+				recommended_at=CASE WHEN checkpoint_observations.outcome IS NULL
+					THEN checkpoint_observations.recommended_at ELSE excluded.recommended_at END,
+				outcome=CASE WHEN checkpoint_observations.outcome IS NULL
+					THEN NULL ELSE checkpoint_observations.outcome END,
+				resolved_at=CASE WHEN checkpoint_observations.outcome IS NULL
+					THEN NULL ELSE checkpoint_observations.resolved_at END`,
+			sess.id, s.projectID, out.Level, out.Metrics.Messages, out.Metrics.DurationMins,
+			out.Metrics.FilesChanged, string(reasons)); err != nil {
+			return nil, checkpointResult{}, fmt.Errorf("record checkpoint recommendation: %w", err)
+		}
 	}
 	return nil, out, nil
 }

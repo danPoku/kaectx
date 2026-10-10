@@ -4,6 +4,7 @@
 package mcpserver_test
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -82,5 +83,84 @@ func TestCheckpointStatusCanSelectSession(t *testing.T) {
 	callTool(t, cs, "checkpoint_status", map[string]any{"session_id": sessionID}, &out)
 	if out.SessionID != sessionID {
 		t.Errorf("session_id = %q, want %q", out.SessionID, sessionID)
+	}
+}
+
+func TestFeedbackStatusTracksCheckpointDecision(t *testing.T) {
+	cs, db := testServer(t)
+	if _, err := db.Exec(`UPDATE sessions SET message_count=400`); err != nil {
+		t.Fatal(err)
+	}
+	var checkpoint checkpointOut
+	callTool(t, cs, "checkpoint_status", map[string]any{}, &checkpoint)
+
+	var inbox struct {
+		Pending int `json:"pending"`
+		Nudges  []struct {
+			Kind      string `json:"kind"`
+			SessionID string `json:"session_id"`
+		} `json:"nudges"`
+	}
+	callTool(t, cs, "feedback_status", map[string]any{}, &inbox)
+	if inbox.Pending != 1 || inbox.Nudges[0].Kind != "checkpoint_outcome_missing" || inbox.Nudges[0].SessionID != checkpoint.SessionID {
+		t.Fatalf("feedback inbox = %+v, want the pending checkpoint", inbox)
+	}
+
+	var recorded struct {
+		Recorded bool   `json:"recorded"`
+		Outcome  string `json:"outcome"`
+	}
+	callTool(t, cs, "record_checkpoint_outcome", map[string]any{
+		"session_id": checkpoint.SessionID, "outcome": "continued", "note": "user chose to keep going",
+	}, &recorded)
+	if !recorded.Recorded || recorded.Outcome != "continued" {
+		t.Fatalf("recorded outcome = %+v", recorded)
+	}
+	callTool(t, cs, "feedback_status", map[string]any{}, &inbox)
+	if inbox.Pending != 0 {
+		t.Fatalf("feedback pending = %d after resolution, want 0", inbox.Pending)
+	}
+}
+
+func TestFeedbackStatusDerivesUnlabelledOpenedResult(t *testing.T) {
+	cs, _ := testServer(t)
+	var search struct {
+		RetrievalRunID string `json:"retrieval_run_id"`
+		Results        []struct {
+			ChunkID int64 `json:"chunk_id"`
+			Rank    int   `json:"rank"`
+		} `json:"results"`
+	}
+	callTool(t, cs, "search_context", map[string]any{"query": "WAL"}, &search)
+	var chunk struct{}
+	callTool(t, cs, "get_chunk", map[string]any{
+		"chunk_id": search.Results[0].ChunkID, "run_id": search.RetrievalRunID, "rank": search.Results[0].Rank,
+	}, &chunk)
+
+	var inbox struct {
+		Pending int `json:"pending"`
+		Nudges  []struct {
+			Kind       string `json:"kind"`
+			Source     string `json:"source"`
+			Confidence string `json:"confidence"`
+			RunID      string `json:"run_id"`
+			Query      string `json:"query"`
+			Rank       int    `json:"rank"`
+		} `json:"nudges"`
+	}
+	callTool(t, cs, "feedback_status", map[string]any{}, &inbox)
+	if inbox.Pending != 1 || inbox.Nudges[0].Kind != "retrieval_outcome_missing" ||
+		inbox.Nudges[0].RunID != search.RetrievalRunID || inbox.Nudges[0].Rank != 1 ||
+		!strings.EqualFold(inbox.Nudges[0].Confidence, "high") {
+		t.Fatalf("feedback inbox = %+v, want exact opened result", inbox)
+	}
+
+	var outcome struct{}
+	callTool(t, cs, "record_retrieval_outcome", map[string]any{
+		"run_id": search.RetrievalRunID, "rank": 1, "outcome": "helpful",
+	}, &outcome)
+	callTool(t, cs, "feedback_status", map[string]any{}, &inbox)
+	if inbox.Pending != 0 {
+		t.Fatalf("feedback pending = %d after label, want 0", inbox.Pending)
 	}
 }

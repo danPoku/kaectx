@@ -17,21 +17,22 @@ import (
 // point: a filter that only looked for tables would miss a silently-failed
 // view creation entirely.
 var expectedObjects = map[string]string{
-	"schema_migrations":    "table",
-	"projects":             "table",
-	"project_paths":        "table",
-	"sources":              "table",
-	"sessions":             "table",
-	"messages":             "table",
-	"chunks":               "table",
-	"chunks_fts":           "table", // fts5 virtual tables register as type=table
-	"file_touches":         "table",
-	"notes":                "table",
-	"notes_fts":            "table",
-	"retrieval_runs":       "table",
-	"retrieval_candidates": "table",
-	"memory_observations":  "table",
-	"v_session_overview":   "view",
+	"schema_migrations":       "table",
+	"projects":                "table",
+	"project_paths":           "table",
+	"sources":                 "table",
+	"sessions":                "table",
+	"messages":                "table",
+	"chunks":                  "table",
+	"chunks_fts":              "table", // fts5 virtual tables register as type=table
+	"file_touches":            "table",
+	"notes":                   "table",
+	"notes_fts":               "table",
+	"retrieval_runs":          "table",
+	"retrieval_candidates":    "table",
+	"memory_observations":     "table",
+	"checkpoint_observations": "table",
+	"v_session_overview":      "view",
 }
 
 func openTestDB(t *testing.T) *sql.DB {
@@ -163,9 +164,9 @@ func TestMigrateTwiceIsANoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	want := 8 // core, session_git, touch_rooted, commit_source, retrieval telemetry/outcomes/governance/opens
+	want := 9 // core, session_git, touch_rooted, commit_source, retrieval telemetry/outcomes/governance/opens/observer
 	if first.VectorsLoaded {
-		want = 9
+		want = 10
 	}
 
 	var count int
