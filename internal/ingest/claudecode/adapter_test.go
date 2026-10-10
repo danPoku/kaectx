@@ -31,6 +31,37 @@ func TestParseLine(t *testing.T) {
 			line:        `{"type":"user","message":{"role":"user","content":"hello there"},"sessionId":"s1","timestamp":"2026-09-20T10:00:00Z"}`,
 			wantMessage: true, wantRole: "user", wantKind: "text", wantContent: "hello there",
 		},
+		// Harness text under role=user, in the shapes seen in real logs.
+		{
+			name:        "task-notification is a system event, not a user turn",
+			line:        `{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>b1</task-id>\n<summary>Monitor event: \"transcription progress\"</summary>\n</task-notification>"},"sessionId":"s1","timestamp":"2026-09-20T10:00:00Z"}`,
+			wantMessage: true, wantRole: "system", wantKind: "event",
+		},
+		{
+			name:        "isMeta line is a system event whatever it says",
+			line:        `{"type":"user","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Your claude.ai usage limit has reset. Continue the task."}]},"sessionId":"s1","timestamp":"2026-09-20T10:00:00Z"}`,
+			wantMessage: true, wantRole: "system", wantKind: "event",
+		},
+		{
+			name:        "IDE context block before the prompt: the prompt is kept, the notice dropped",
+			line:        `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"<ide_opened_file>The user opened the file ollama.go in the IDE.</ide_opened_file>"},{"type":"text","text":"why does embed time out?"}]},"sessionId":"s1","timestamp":"2026-09-20T10:00:00Z"}`,
+			wantMessage: true, wantRole: "user", wantKind: "text", wantContent: "why does embed time out?",
+		},
+		{
+			name:        "prompt split around an image keeps both text blocks",
+			line:        `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"this toast"},{"type":"image","source":{"type":"base64","data":"..."}},{"type":"text","text":"looks wrong"}]},"sessionId":"s1","timestamp":"2026-09-20T10:00:00Z"}`,
+			wantMessage: true, wantRole: "user", wantKind: "text", wantContent: "this toast\n\nlooks wrong",
+		},
+		{
+			name:        "slash command is a genuine user turn",
+			line:        `{"type":"user","message":{"role":"user","content":"<command-message>review</command-message>\n<command-name>/review</command-name>"},"sessionId":"s1","timestamp":"2026-09-20T10:00:00Z"}`,
+			wantMessage: true, wantRole: "user", wantKind: "text",
+		},
+		{
+			name:     "image-only prompt has no text to store",
+			line:     `{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","data":"..."}}]},"sessionId":"s1","timestamp":"2026-09-20T10:00:00Z"}`,
+			wantSkip: true,
+		},
 		{
 			name:        "assistant thinking block",
 			line:        `{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"pondering"}]},"sessionId":"s1","timestamp":"2026-09-20T10:00:01Z"}`,

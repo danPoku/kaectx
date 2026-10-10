@@ -23,9 +23,10 @@ $ ctx search "how does the daemon embed new chunks in the background"
 ## Status
 
 Early. The current tagged release is v0.1.3; `master` includes unreleased
-work toward file-aware memory. It has been run on one machine, on Ubuntu
-under WSL2; other platforms are untested. Expect breaking changes in the 0.x
-series, including to the database schema and the MCP tool output. See
+work toward file-aware memory. Linux (including Ubuntu under WSL2) is the
+primary environment; native Windows is also supported and tested. Expect
+breaking changes in the 0.x series, including to the database schema and the
+MCP tool output. See
 [Limitations](#limitations) before relying on it.
 
 Articles written before this work describe the v0.1.3 feature set. They are still
@@ -87,6 +88,29 @@ go install -tags sqlite_fts5 ./cmd/ctx
 Either puts `ctx` in `$(go env GOPATH)/bin`. Make sure that directory is on your
 `PATH`.
 
+### Windows
+
+Windows is fully supported, but SQLite and sqlite-vec require cgo and a
+MinGW-w64 compiler. From a clone, the checked-in installer discovers an MSYS2
+UCRT64 or MinGW64 compiler, optionally runs the native test gate, creates a
+timestamped backup of the existing executable, and installs `ctx.exe` into the
+Go bin directory:
+
+```powershell
+winget install MSYS2.MSYS2
+C:\msys64\usr\bin\bash.exe -lc "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-gcc"
+
+git clone https://github.com/danPoku/kaectx
+cd kaectx
+.\scripts\install-windows.ps1 -RunTests
+```
+
+If an agent already has `ctx mcp` open, close that session first or add
+`-StopRunningCtx`; Windows does not replace a running executable. Native
+Windows stores its catalogue at `%USERPROFILE%\.ctx\ctx.db` and reads the
+Windows-native Claude Code and Codex logs. It is independent of a WSL
+installation and its `/home/<user>/.ctx/ctx.db`.
+
 ### macOS
 
 macOS is expected to work on Apple Silicon and Intel, but it has not been built
@@ -122,8 +146,11 @@ ctx explain internal/auth.go      # shows past sessions that touched a file
 ```
 
 `ctx search` is scoped to the project that contains your current directory. Use
-`--agent claude-code` or `--agent codex` to restrict results to one agent, and
-`--limit N` to change how many come back.
+`--agent claude-code` or `--agent codex` to restrict results to one agent,
+`--limit N` to change how many come back, and `--since`/`--until` to search one
+period (`--since 2026-09-28 --until 2026-10-04`; a date as `--until` includes
+that whole day, dates are UTC). Equally good matches are listed newest first.
+If some session logs haven't been ingested yet, it says so on stderr.
 
 After upgrading from an older version, run these once (add `--dry-run` to see
 what they would do first). Both read only what is already in the database, are
@@ -131,6 +158,13 @@ safe to repeat, and run in a single transaction:
 
 - `ctx repair touches` rebuilds file records for Codex `apply_patch` calls
   ingested before ctx could read them, from the patch text already stored.
+- `ctx repair messages` re-reads user messages from their stored raw lines.
+  Older versions filed harness-injected text (task notifications, IDE context,
+  Codex environment snapshots, AGENTS.md) as if the person had typed it, kept
+  only the first block of a multi-part prompt, and left Codex sessions
+  untitled. This reclassifies those messages, rebuilds the affected sessions'
+  chunks (re-embedded by `ctx daemon` or `ctx embed`), and titles sessions
+  from their first typed prompt.
 - `ctx repair git` recomputes each session's git commit span from its own
   timestamps and rewrites older working-directory-relative file paths to be
   repo-root-relative. Rows whose directory no longer exists are retried on the
@@ -145,6 +179,14 @@ as `internal/store/store.go`.
 does a full rescan every five minutes in case a filesystem event was missed,
 and embeds new chunks every 30 seconds if Ollama is reachable. If Ollama is
 down it logs the error once and keeps ingesting.
+
+Without the daemon, `ctx mcp` closes most of the gap itself: it catches up on
+unread logs in the background when an agent starts it, and again when a search
+finds logs it hasn't read. `search_context` and `recent_sessions` report this
+in an `index` field, with a `warning` while logs are still unread, so an agent
+can say "ctx is behind" instead of "nothing happened". A lock file
+(`~/.ctx/ingest.lock`) keeps several MCP servers from catching up at once. The
+daemon is still the way to keep the index current between sessions.
 
 As a systemd user service:
 
@@ -204,10 +246,10 @@ a new chat.
 
 | Tool | What it does |
 | --- | --- |
-| `search_context` | Keyword plus semantic search over past sessions in this project, across all agents. Returns snippets centred on the match, each with the time of the turn and the message range (`first_seq`, `last_seq`) of the exchange it came from. |
+| `search_context` | Keyword plus semantic search over past sessions in this project, across all agents. Returns snippets centred on the match, each with the time of the turn and the message range (`first_seq`, `last_seq`) of the exchange it came from. `since`/`until` limit it to one period. |
 | `get_chunk` | Reads one search hit in full, the user turn and the assistant's reply (about 1k tokens), by `chunk_id`. |
 | `get_session` | Reads a session's messages in order. Conversation text only unless `include_tools` is set; capped by total characters (`max_chars`, default 20000) and by message length, with `next_from_seq` for paging. |
-| `recent_sessions` | Lists recent sessions, newest first. |
+| `recent_sessions` | Lists recent sessions, newest first; `since`/`until` list the sessions active in a period. |
 | `sessions_touching` | Sessions that read or edited a given file. |
 | `explain_file` | Builds a compact briefing for a file: sessions that touched it, actions, known git commit span, and chunk ids to open for the reasoning behind the work. |
 | `save_note` | Records a decision, gotcha, convention, todo, or fact. |
@@ -239,10 +281,10 @@ first_seq and last_seq rather than paging from the start.
 | `ctx init` | Create `~/.ctx` and the database. Other commands do this too if needed. |
 | `ctx ingest [--path FILE] [--agent A]` | One-shot ingest of the default directories, or of a single file. |
 | `ctx embed [--batch N]` | Embed pending chunks through Ollama. |
-| `ctx search <query> [--agent A] [--limit N]` | Search the current project. |
+| `ctx search <query> [--agent A] [--limit N] [--since D] [--until D]` | Search the current project. |
 | `ctx project list` | Show projects, their remotes, session counts and known paths. |
 | `ctx project merge <from> <into>` | Fold one project into another. |
-| `ctx mcp` | Serve MCP over stdio. |
+| `ctx mcp` | Serve MCP over stdio. Catches up on unread session logs in the background. |
 | `ctx daemon` | Ingest and embed continuously. |
 
 `ctx project merge` exists because a session whose working directory has since
@@ -310,8 +352,10 @@ way.
   exist yet. Ingest has been checked against logs from Claude Code 2.1.278 and
   codex-cli 0.153.0. These formats are undocumented and change without notice,
   so a new version can break an adapter.
-- kaectx reads logs on the machine it runs on. Under WSL that means agents have to
-  run inside WSL. Windows-native agents write to `C:\Users\…` and are not read.
+- kaectx reads logs from the environment where it runs. A native Windows
+  process reads Windows agent logs and `%USERPROFILE%\.ctx\ctx.db`; a Linux or
+  WSL process reads Linux agent logs and `~/.ctx/ctx.db`. The catalogues are
+  separate unless deliberately migrated.
 - File-touch tracking (`sessions_touching`, `explain_file`, `ctx explain`) covers
   Claude Code's Read, Edit, MultiEdit and Write tools and Codex's `apply_patch`.
   Other Codex tool calls and edits made through a shell command are not
@@ -343,13 +387,23 @@ way.
 
 ## Development
 
+Linux is the primary development environment:
+
 ```
 go vet -tags sqlite_fts5 ./...
 go test -tags sqlite_fts5 ./...
 ```
 
-`TestOllamaClientLive` talks to a real Ollama and needs `nomic-embed-text`
-pulled; the rest of the suite runs without it.
+For native Windows development, install the MSYS2 UCRT64 compiler once and use
+the installer to run the same test/vet gate and replace the local executable:
+
+```powershell
+.\scripts\install-windows.ps1 -RunTests -StopRunningCtx
+```
+
+Linux and Windows run as separate CI jobs. `TestOllamaClientLive` is excluded
+from the deterministic default suite; set `CTX_LIVE_OLLAMA=1` to run it against
+a real Ollama with `nomic-embed-text` pulled.
 
 Layout:
 

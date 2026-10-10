@@ -95,3 +95,34 @@ func TestRedactPreservesJSONValidity(t *testing.T) {
 		t.Errorf("Redact(%q) = %q, left the AWS key in place", raw, got)
 	}
 }
+
+// Scan must agree with Redact: it flags exactly the text Redact would change,
+// and text that has already been through Redact comes back clean.
+func TestScanAgreesWithRedact(t *testing.T) {
+	leaks := map[string]string{
+		"github-token":       "token ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA here",
+		"aws-access-key":     "AKIAIOSFODNN7EXAMPLE",
+		"env-line":           "DATABASE_URL=postgres://user:hunter2@localhost/db",
+		"high-entropy-token": "value a8Fk29xQpLmZ0vR7tYw3NcB5hJd1 end",
+	}
+	for want, input := range leaks {
+		hits := Scan(input)
+		found := false
+		for _, h := range hits {
+			if h == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("Scan(%q) = %v, want it to include %q", input, hits, want)
+		}
+		if again := Scan(Redact(input)); len(again) != 0 {
+			t.Errorf("Scan(Redact(%q)) = %v, want no hits", input, again)
+		}
+	}
+	for _, clean := range []string{"just ordinary prose about refactoring", "func handleRequest(w http.ResponseWriter)", "API_KEY=[REDACTED]"} {
+		if hits := Scan(clean); len(hits) != 0 {
+			t.Errorf("Scan(%q) = %v, want no hits", clean, hits)
+		}
+	}
+}

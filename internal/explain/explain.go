@@ -7,9 +7,12 @@ package explain
 
 import (
 	"database/sql"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/danPoku/kaectx/internal/paths"
 
 	"github.com/danPoku/kaectx/internal/store"
 	"github.com/danPoku/kaectx/queries"
@@ -98,11 +101,7 @@ func File(db *sql.DB, projectID int64, path string, limit int) (Result, error) {
 // NormalizePath puts a user-supplied path in the form file_touches stores:
 // slash-separated, cleaned, no leading "./".
 func NormalizePath(p string) string {
-	p = strings.ReplaceAll(strings.TrimSpace(p), `\`, "/")
-	if p == "" {
-		return p
-	}
-	return strings.TrimPrefix(filepath.ToSlash(filepath.Clean(p)), "./")
+	return paths.CleanSlash(p)
 }
 
 // ResolvePath turns a path the caller typed (relative to cwd, or absolute)
@@ -115,14 +114,29 @@ func ResolvePath(cwd, p string) string {
 	if p == "" || cwd == "" {
 		return NormalizePath(p)
 	}
+	originalPath := p
+	if mappedCWD, ok := paths.ToHost(cwd); ok {
+		if _, err := os.Stat(mappedCWD); err == nil {
+			cwd = mappedCWD
+			if mappedPath, ok := paths.ToHost(p); ok {
+				p = mappedPath
+			}
+		}
+	}
 	abs := p
-	if !filepath.IsAbs(abs) {
+	if paths.IsAbs(abs) && !filepath.IsAbs(abs) {
+		if rel, ok := paths.RelIfWithin(cwd, abs); ok {
+			return NormalizePath(rel)
+		}
+		return NormalizePath(originalPath)
+	}
+	if !paths.IsAbs(abs) {
 		abs = filepath.Join(cwd, abs)
 	}
 	root := repoRoot(cwd)
 	rel, err := filepath.Rel(root, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return NormalizePath(p)
+		return NormalizePath(originalPath)
 	}
 	return NormalizePath(rel)
 }
@@ -134,7 +148,7 @@ func ResolvePath(cwd, p string) string {
 // "internal/store/store.go" into a wrong one whenever the agent launched
 // `ctx mcp` from a subdirectory.
 func ProjectPath(cwd, p string) string {
-	if filepath.IsAbs(strings.TrimSpace(p)) {
+	if paths.IsAbs(strings.TrimSpace(p)) {
 		return ResolvePath(cwd, p)
 	}
 	return NormalizePath(p)

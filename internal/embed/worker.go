@@ -18,12 +18,12 @@ import (
 // query's own comment): embeds each with client, writes it into
 // chunk_vectors, and marks the chunk embedded.
 //
-// A chunk whose session never resolved a project is skipped, not
-// embedded — chunk_vectors.project_id is vec0's PARTITION KEY and can't be
-// NULL, and a session with no project is already a degenerate case (see
-// internal/ingest/session.go). It stays pending; nothing currently clears
-// it, so it needs project resolution fixed upstream rather than a fake
-// value here.
+// A chunk whose session never resolved a project is never embedded —
+// chunk_vectors.project_id is vec0's PARTITION KEY and can't be NULL, and a
+// session with no project is already a degenerate case (see
+// internal/ingest/session.go). PendingEmbeddings leaves those chunks out, so
+// they can't crowd embeddable chunks out of a batch; they stay pending until
+// project resolution is fixed upstream rather than given a fake value here.
 //
 // One chunk failing to embed (a transient network error, model unloaded)
 // stops the batch and returns the error — unlike ingest's per-line
@@ -63,6 +63,8 @@ func Run(ctx context.Context, db *sql.DB, client Embedder, batchSize int) (proce
 
 	for _, p := range batch {
 		if !p.projectID.Valid {
+			// Unreachable while the query filters these out; kept so a
+			// future query change can't turn it into a NOT NULL failure.
 			continue
 		}
 

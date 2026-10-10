@@ -38,6 +38,16 @@ type HybridResult struct {
 // the embedding model changes; the corpus it was measured on was small.
 const MaxSemanticDistance = 0.50
 
+// Nearest-neighbour candidates fetched for the semantic half. vec0 can't
+// filter by time inside the KNN search, so under a date window more
+// candidates are fetched and the window applied after; otherwise the 50
+// nearest chunks across the whole project could all be out of range,
+// leaving a windowed search keyword-only without saying so.
+const (
+	semanticK         = 50
+	semanticKWindowed = 400
+)
+
 // Hybrid runs Reciprocal Rank Fusion of keyword (FTS) and semantic (vector)
 // search over chunks. It embeds query itself via client, so callers don't
 // need to know embedding details — same contract as Keyword, just backed by
@@ -48,6 +58,11 @@ const MaxSemanticDistance = 0.50
 // copy rather than a shared ":agent IS NULL OR ..." clause); which one runs
 // is an implementation detail callers shouldn't need to think about.
 func Hybrid(ctx context.Context, db *sql.DB, client embed.Embedder, query string, projectID int64, agent string, limit int) ([]HybridResult, error) {
+	return HybridIn(ctx, db, client, query, projectID, agent, Window{}, limit)
+}
+
+// HybridIn is Hybrid limited to turns inside w.
+func HybridIn(ctx context.Context, db *sql.DB, client embed.Embedder, query string, projectID int64, agent string, w Window, limit int) ([]HybridResult, error) {
 	vec, err := client.Embed(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)
@@ -57,6 +72,10 @@ func Hybrid(ctx context.Context, db *sql.DB, client embed.Embedder, query string
 		return nil, err
 	}
 
+	semK := semanticK
+	if !w.IsZero() {
+		semK = semanticKWindowed
+	}
 	queryName := "SearchHybrid"
 	args := []any{
 		sql.Named("query", sanitizeFTS5Query(query)),
@@ -64,7 +83,9 @@ func Hybrid(ctx context.Context, db *sql.DB, client embed.Embedder, query string
 		sql.Named("project_id", projectID),
 		sql.Named("max_distance", MaxSemanticDistance),
 		sql.Named("limit", limit),
+		sql.Named("sem_k", semK),
 	}
+	args = append(args, w.Args()...)
 	if agent != "" {
 		queryName = "SearchHybridByAgent"
 		args = append(args, sql.Named("agent", agent))

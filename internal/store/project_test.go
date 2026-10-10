@@ -107,6 +107,37 @@ func TestResolveProjectDeduplicatesByGitRemote(t *testing.T) {
 	}
 }
 
+func TestLookupProjectNeverRegistersProjectsOrPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	db := migratedTestDB(t)
+	known := initGitRepoWithRemote(t, "git@github.com:dan/known.git")
+	projectID, err := ResolveProject(db, known)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newCheckout := initGitRepoWithRemote(t, "https://github.com/dan/known.git")
+	got, ok, err := LookupProject(db, newCheckout)
+	if err != nil || !ok || got != projectID {
+		t.Fatalf("LookupProject(known remote) = %d, %v, %v; want %d, true, nil", got, ok, err, projectID)
+	}
+	unknown := initGitRepoWithRemote(t, "https://github.com/dan/unknown.git")
+	if got, ok, err := LookupProject(db, unknown); err != nil || ok || got != 0 {
+		t.Fatalf("LookupProject(unknown) = %d, %v, %v; want 0, false, nil", got, ok, err)
+	}
+	var projects, paths int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM projects`).Scan(&projects); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM project_paths`).Scan(&paths); err != nil {
+		t.Fatal(err)
+	}
+	if projects != 1 || paths != 1 {
+		t.Errorf("lookup mutated catalogue: projects=%d paths=%d; want 1, 1", projects, paths)
+	}
+}
+
 func initGitRepoWithRemote(t *testing.T, remote string) string {
 	t.Helper()
 	dir := t.TempDir()

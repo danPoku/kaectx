@@ -35,6 +35,11 @@ type KeywordResult struct {
 // Keyword runs SearchKeyword: BM25-ranked full-text search over chunks,
 // scoped to a project and optionally to one agent.
 func Keyword(db *sql.DB, query string, projectID int64, agent string, limit int) ([]KeywordResult, error) {
+	return KeywordIn(db, query, projectID, agent, Window{}, limit)
+}
+
+// KeywordIn is Keyword limited to turns inside w.
+func KeywordIn(db *sql.DB, query string, projectID int64, agent string, w Window, limit int) ([]KeywordResult, error) {
 	sqlText, err := store.LoadQuery(queries.FS, "retrieval.sql", "SearchKeyword")
 	if err != nil {
 		return nil, err
@@ -45,12 +50,12 @@ func Keyword(db *sql.DB, query string, projectID int64, agent string, limit int)
 		agentArg = agent
 	}
 
-	rows, err := db.Query(sqlText,
+	rows, err := db.Query(sqlText, append([]any{
 		sql.Named("query", sanitizeFTS5Query(query)),
 		sql.Named("project_id", projectID),
 		sql.Named("agent", agentArg),
 		sql.Named("limit", limit),
-	)
+	}, w.Args()...)...)
 	if err != nil {
 		return nil, err
 	}

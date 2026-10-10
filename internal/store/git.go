@@ -4,11 +4,14 @@
 package store
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/danPoku/kaectx/internal/paths"
 	"time"
 )
 
@@ -192,6 +195,11 @@ func (g *GitResolver) Root(dir string) string {
 	if dir == "" {
 		return ""
 	}
+	if mapped, ok := paths.ToHost(dir); ok {
+		if _, err := os.Stat(mapped); err == nil {
+			dir = mapped
+		}
+	}
 	return g.locate(dir).root
 }
 
@@ -211,8 +219,23 @@ func (g *GitResolver) ProjectPath(cwd, path string) string {
 	if cwd == "" || path == "" {
 		return path
 	}
+	originalPath := path
+	if mappedCWD, ok := paths.ToHost(cwd); ok {
+		if _, err := os.Stat(mappedCWD); err == nil {
+			cwd = mappedCWD
+			if mappedPath, ok := paths.ToHost(path); ok {
+				path = mappedPath
+			}
+		}
+	}
 	abs := path
-	if !filepath.IsAbs(abs) {
+	if paths.IsAbs(abs) && !filepath.IsAbs(abs) {
+		if rel, ok := paths.RelIfWithin(cwd, abs); ok {
+			return rel
+		}
+		return originalPath
+	}
+	if !paths.IsAbs(abs) {
 		abs = filepath.Join(cwd, abs)
 	}
 	loc := g.locate(cwd)
@@ -226,7 +249,7 @@ func (g *GitResolver) ProjectPath(cwd, path string) string {
 	}
 	rel, err := filepath.Rel(base, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return path
+		return originalPath
 	}
 	return filepath.ToSlash(rel)
 }

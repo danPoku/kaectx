@@ -102,8 +102,11 @@ func TestSanitizeFTS5QueryOutputIsAlwaysValidFTS5(t *testing.T) {
 	}
 	for _, q := range queries {
 		sanitized := sanitizeFTS5Query(q)
-		if _, err := db.Query(`SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?`, sanitized); err != nil {
+		rows, err := db.Query(`SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?`, sanitized)
+		if err != nil {
 			t.Errorf("query %q sanitized to %q: FTS5 MATCH failed: %v", q, sanitized, err)
+			continue
 		}
+		rows.Close()
 	}
 }

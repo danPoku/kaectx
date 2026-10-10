@@ -54,6 +54,14 @@ func runIngest(args []string) error {
 	}
 	defer db.Close()
 
+	// One ingester at a time; see ingest.Lock. If the daemon holds the lock
+	// it is already keeping the index current, so there is nothing to do.
+	release, err := ingest.Lock(ingestLockPath(home))
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if *path != "" {
 		src, err := findAgentSource(*agent)
 		if err != nil {
@@ -83,6 +91,23 @@ func runIngest(args []string) error {
 	}
 	fmt.Printf("ingested %d file(s), %d failed\n", ok, failed)
 	return nil
+}
+
+// ingestRoots is agentSources resolved against home, in the shape the
+// ingest and mcpserver packages take.
+func ingestRoots(home string) []ingest.Root {
+	roots := make([]ingest.Root, len(agentSources))
+	for i, src := range agentSources {
+		roots[i] = ingest.Root{Agent: src.name, Dir: src.root(home), NewAdapter: src.newAdapter}
+	}
+	return roots
+}
+
+// ingestLockPath is the lock ingest.CatchUp uses to keep concurrent ctx
+// processes from catching up at the same time. It sits beside the database
+// because that is the thing it protects.
+func ingestLockPath(home string) string {
+	return filepath.Join(home, ".ctx", "ingest.lock")
 }
 
 func findAgentSource(name string) (agentSource, error) {

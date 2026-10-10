@@ -117,7 +117,9 @@ func TestSearchContext(t *testing.T) {
 			Agent     string `json:"agent"`
 			Snippet   string `json:"snippet"`
 		} `json:"results"`
-		UsedSemanticSearch bool `json:"used_semantic_search"`
+		UsedSemanticSearch bool   `json:"used_semantic_search"`
+		RetrievalRunID     string `json:"retrieval_run_id"`
+		TelemetryRecorded  bool   `json:"telemetry_recorded"`
 	}
 	callTool(t, cs, "search_context", map[string]any{"query": "WAL"}, &out)
 
@@ -136,6 +138,76 @@ func TestSearchContext(t *testing.T) {
 	// just tested in isolation.
 	if out.UsedSemanticSearch {
 		t.Error("UsedSemanticSearch = true, want false (brokenEmbedder always fails)")
+	}
+	if out.RetrievalRunID == "" {
+		t.Error("RetrievalRunID is empty, want recorded telemetry")
+	}
+	if !out.TelemetryRecorded {
+		t.Error("TelemetryRecorded = false, want true")
+	}
+}
+
+func TestRecordRetrievalOutcomeUsesRunAndRank(t *testing.T) {
+	cs, db := testServer(t)
+	var out struct {
+		Recorded     bool    `json:"recorded"`
+		EvidenceKey  string  `json:"evidence_key"`
+		Observations int     `json:"observations"`
+		Reliability  float64 `json:"reliability"`
+		Neutral      bool    `json:"neutral"`
+	}
+	fakeSecret := "ghp_" + strings.Repeat("A", 36)
+	var runIDs []string
+	for i, outcome := range []string{"helpful", "incorrect", "incorrect"} {
+		var searchOut struct {
+			RetrievalRunID string `json:"retrieval_run_id"`
+		}
+		callTool(t, cs, "search_context", map[string]any{"query": "WAL"}, &searchOut)
+		if searchOut.RetrievalRunID == "" {
+			t.Fatal("search did not return a retrieval run id")
+		}
+		runIDs = append(runIDs, searchOut.RetrievalRunID)
+		callTool(t, cs, "record_retrieval_outcome", map[string]any{
+			"run_id": searchOut.RetrievalRunID, "rank": 1,
+			"outcome": outcome, "note": "token " + fakeSecret,
+		}, &out)
+		if !out.Recorded || out.Observations != i+1 {
+			t.Fatalf("outcome %d result = %+v", i, out)
+		}
+	}
+	if out.Neutral || out.Reliability >= 1 || len(out.EvidenceKey) != 64 {
+		t.Errorf("final assessment = %+v, want non-neutral bounded reliability", out)
+	}
+	var note string
+	if err := db.QueryRow(`SELECT note FROM memory_observations ORDER BY id LIMIT 1`).Scan(&note); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(note, fakeSecret) || !strings.Contains(note, "[REDACTED]") {
+		t.Errorf("stored note was not redacted: %q", note)
+	}
+
+	// A second opinion from the same retrieval replaces that opinion instead
+	// of manufacturing another observation.
+	callTool(t, cs, "record_retrieval_outcome", map[string]any{
+		"run_id": runIDs[0], "rank": 1, "outcome": "helpful",
+	}, &out)
+	if out.Observations != 3 {
+		t.Errorf("duplicate feedback produced %d observations, want 3", out.Observations)
+	}
+
+	// Bounded telemetry may disappear, but the actuarial experience must keep
+	// its stable evidence identity and merely lose the optional provenance.
+	if _, err := db.Exec(`DELETE FROM retrieval_runs WHERE id=?`, runIDs[0]); err != nil {
+		t.Fatal(err)
+	}
+	var runID sql.NullString
+	var rank sql.NullInt64
+	var evidence string
+	if err := db.QueryRow(`SELECT run_id,candidate_rank,evidence_key FROM memory_observations ORDER BY id LIMIT 1`).Scan(&runID, &rank, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if runID.Valid || rank.Valid || evidence == "" {
+		t.Errorf("pruned observation = run %v rank %v evidence %q", runID, rank, evidence)
 	}
 }
 

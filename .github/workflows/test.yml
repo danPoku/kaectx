@@ -1,0 +1,42 @@
+name: test
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -count=1 -tags sqlite_fts5 ./...
+      - run: go vet -tags sqlite_fts5 ./...
+      - run: go build -tags sqlite_fts5 ./cmd/ctx
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-gcc
+          path-type: inherit
+      - name: Test, vet, and build
+        shell: msys2 {0}
+        run: |
+          export CC=gcc
+          export CGO_ENABLED=1
+          go test -count=1 -tags sqlite_fts5 ./...
+          go vet -tags sqlite_fts5 ./...
+          go build -tags sqlite_fts5 ./cmd/ctx

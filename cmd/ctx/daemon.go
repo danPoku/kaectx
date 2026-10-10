@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/danPoku/kaectx/internal/daemon"
 	"github.com/danPoku/kaectx/internal/embed"
+	"github.com/danPoku/kaectx/internal/ingest"
 )
 
 func runDaemon(args []string) error {
@@ -45,6 +47,20 @@ func runDaemon(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// The daemon owns ingest for as long as it runs: holding the ingest lock
+	// makes MCP servers skip their own catch-ups (the daemon is already
+	// current) and stops `ctx ingest` from racing it. If an MCP server is
+	// midway through a catch-up, wait for it rather than give up.
+	release, err := ingest.Lock(ingestLockPath(home))
+	if errors.Is(err, ingest.ErrIngestBusy) {
+		fmt.Println("ctx daemon: another ctx process is ingesting; waiting for it to finish")
+		release, err = ingest.LockWait(ctx, ingestLockPath(home), 2*time.Second)
+	}
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	fmt.Printf("ctx daemon: watching %d source(s), press Ctrl+C to stop\n", len(sources))
 	for _, src := range sources {

@@ -48,6 +48,7 @@ package codex
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/danPoku/kaectx/internal/ingest"
 )
@@ -210,28 +211,27 @@ func (a *Adapter) parseResponseItem(l line, raw []byte) (ingest.ParseResult, err
 	}
 }
 
-// classifyMessage decides whether a response_item/message block is a
-// genuine human turn, the assistant speaking, or framework-injected
-// context — see the package doc for why this needs content_item_kinds
-// rather than just the raw role.
-func classifyMessage(role string, kinds []string) (outRole, outKind string) {
-	if role == "assistant" {
-		return "assistant", "text"
+// typedBlock decides whether block i of a role=user/developer message is
+// something the person typed — see the package doc for why this needs
+// content_item_kinds rather than just the raw role.
+//
+// content_item_kinds has one entry per block ("user.text", "user.image",
+// "environments.environment_context", ...), so each block is judged on its
+// own: real messages mix them, e.g. [user.text, user.image], or AGENTS.md +
+// environment context in one message. When kinds are missing (older Codex
+// versions, the most common case in real logs), the block's own text is
+// checked for the wrappers the harness puts around injected context
+// (ingest.IsInjectedUserText). Trusting the raw role there, as an earlier
+// version did, stored hundreds of <environment_context>, AGENTS.md and
+// <turn_aborted> blocks as if the person had typed them.
+func typedBlock(role string, kinds []string, i int, b contentBlock) bool {
+	if role != "user" || b.Type != "input_text" {
+		return false // developer is always framework context; images aren't text
 	}
 	if len(kinds) == 0 {
-		// No discriminator available (older/different format): trust the
-		// raw role rather than guess. developer is always framework
-		// context in every sample seen; user without kinds info is taken
-		// at face value.
-		if role == "developer" {
-			return "system", "event"
-		}
-		return "user", "text"
+		return !ingest.IsInjectedUserText(b.Text)
 	}
-	if kinds[0] == "user.text" {
-		return "user", "text"
-	}
-	return "system", "event"
+	return i < len(kinds) && kinds[i] == "user.text"
 }
 
 func (a *Adapter) parseMessage(p responseItemPayload, raw []byte, timestamp string, upd ingest.SessionUpdate) (ingest.ParseResult, error) {
@@ -243,20 +243,43 @@ func (a *Adapter) parseMessage(p responseItemPayload, raw []byte, timestamp stri
 		return ingest.ParseResult{Skip: true, Session: upd}, nil
 	}
 
-	role, kind := classifyMessage(p.Role, p.Meta.ContentItemKinds)
-	content := blocks[0].Text
-	if role == "user" && kind == "text" {
-		// Only a genuine human prompt is escaped by the extension; assistant
-		// text and injected framework context are stored as written.
-		content = cleanUserText(content)
+	if p.Role == "assistant" {
+		return ingest.ParseResult{
+			Message: &ingest.RawMessage{
+				Role: "assistant", Kind: "text", Content: blocks[0].Text,
+				Raw: raw, CreatedAt: timestamp,
+			},
+			Session: upd,
+		}, nil
 	}
-	return ingest.ParseResult{
-		Message: &ingest.RawMessage{
-			Role: role, Kind: kind, Content: content,
-			Raw: raw, CreatedAt: timestamp,
-		},
-		Session: upd,
-	}, nil
+
+	// A user message can hold several blocks: the prompt plus images, or
+	// several injected sections. Reading every block (not just the first)
+	// keeps a prompt that comes after injected context, and anything typed
+	// makes the whole message a user turn.
+	var typed, injected []string
+	for i, b := range blocks {
+		if strings.TrimSpace(b.Text) == "" {
+			continue
+		}
+		if typedBlock(p.Role, p.Meta.ContentItemKinds, i, b) {
+			// Only a genuine human prompt is escaped by the extension;
+			// injected framework context is stored as written.
+			typed = append(typed, cleanUserText(b.Text))
+		} else {
+			injected = append(injected, b.Text)
+		}
+	}
+	msg := &ingest.RawMessage{Raw: raw, CreatedAt: timestamp}
+	switch {
+	case len(typed) > 0:
+		msg.Role, msg.Kind, msg.Content = "user", "text", strings.Join(typed, "\n\n")
+	case len(injected) > 0:
+		msg.Role, msg.Kind, msg.Content = "system", "event", strings.Join(injected, "\n\n")
+	default:
+		return ingest.ParseResult{Skip: true, Session: upd}, nil // images only
+	}
+	return ingest.ParseResult{Message: msg, Session: upd}, nil
 }
 
 type eventMsgPayload struct {

@@ -18,6 +18,10 @@ import (
 // coding agent (Claude Code, Codex, ...) as a local subprocess, from within
 // the project the agent is working on — mcpserver.New resolves that project
 // from this process's own working directory, same as `ctx search` does.
+//
+// The server is also given the agents' log directories, so it can catch up
+// on unread logs itself when no `ctx daemon` is running; see
+// mcpserver.Options.
 func runMCP(args []string) error {
 	db, _, err := openStore()
 	if err != nil {
@@ -29,8 +33,14 @@ func runMCP(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home directory: %w", err)
+	}
 	client := embed.NewOllamaClient(embed.DefaultBaseURL, embed.DefaultModel)
-	srv, err := mcpserver.New(db, cwd, client)
+	srv, err := mcpserver.NewWithOptions(db, cwd, client, mcpserver.Options{
+		Roots: ingestRoots(home), LockPath: ingestLockPath(home),
+	})
 	if err != nil {
 		return err
 	}

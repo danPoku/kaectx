@@ -6,12 +6,20 @@
 -- Scoping rule used everywhere:
 --   :project_id  -> required for project scope; the app omits it for cross-project
 --   :agent       -> NULL = cross-agent (everyone's files), 'codex' = within-agent
+--   :since/:until -> NULL = no bound; otherwise ISO-8601 UTC, since inclusive,
+--                    until exclusive. Search applies them to WHEN THE TURN
+--                    HAPPENED, not when its session started: one long session
+--                    can span a week. Comparisons go through julianday(),
+--                    not text: agents log '...:05.123Z' and '...:05Z' side by
+--                    side, which sort wrongly as strings within one second.
 -- =============================================================================
 
 
 -- name: SearchKeyword :many
 -- BM25 keyword search. Great for exact things: error strings, function names,
 -- ticket ids. FTS5's `rank` is lower-is-better, so ASC is the right order.
+-- Exact ties go to the more recent turn: between two equally good answers,
+-- last week's is likelier to still be true than March's.
 -- snippet() returns a ~24-token window with the hit bracketed — the
 -- highlighted line on the index card, not the whole card.
 SELECT c.id                                       AS chunk_id,
@@ -33,7 +41,16 @@ SELECT c.id                                       AS chunk_id,
  WHERE chunks_fts MATCH :query
    AND s.project_id = :project_id
    AND (:agent IS NULL OR s.agent = :agent)
- ORDER BY chunks_fts.rank
+   AND (:since IS NULL OR julianday(COALESCE(s.ended_at, s.started_at)) >= julianday(:since))
+   AND (:until IS NULL OR julianday(s.started_at) < julianday(:until))
+   AND ((:since IS NULL AND :until IS NULL) OR EXISTS (
+         SELECT 1 FROM (SELECT COALESCE(MIN(m.created_at), s.started_at) AS t
+                          FROM messages m
+                         WHERE m.session_id = c.session_id
+                           AND m.seq BETWEEN c.first_seq AND c.last_seq) w
+          WHERE (:since IS NULL OR julianday(w.t) >= julianday(:since))
+               AND (:until IS NULL OR julianday(w.t) < julianday(:until))))
+ ORDER BY chunks_fts.rank, chunk_at DESC
  LIMIT :limit;
 
 
@@ -52,13 +69,22 @@ SELECT c.id                                       AS chunk_id,
 -- This file shows the cross-agent, project-scoped variant.
 WITH kw AS (
     SELECT c.id AS chunk_id,
-           row_number() OVER (ORDER BY chunks_fts.rank) AS r
+           row_number() OVER (ORDER BY chunks_fts.rank, s.started_at DESC, c.first_seq DESC) AS r  -- ties: newer turn first (not c.id: repair re-inserts old chunks with new ids)
       FROM chunks_fts
       JOIN chunks   c ON c.id = chunks_fts.rowid
       JOIN sessions s ON s.id = c.session_id
      WHERE chunks_fts MATCH :query
        AND s.project_id = :project_id
-     ORDER BY chunks_fts.rank
+       AND (:since IS NULL OR julianday(COALESCE(s.ended_at, s.started_at)) >= julianday(:since))
+       AND (:until IS NULL OR julianday(s.started_at) < julianday(:until))
+       AND ((:since IS NULL AND :until IS NULL) OR EXISTS (
+             SELECT 1 FROM (SELECT COALESCE(MIN(m.created_at), s.started_at) AS t
+                              FROM messages m
+                             WHERE m.session_id = c.session_id
+                               AND m.seq BETWEEN c.first_seq AND c.last_seq) w
+              WHERE (:since IS NULL OR julianday(w.t) >= julianday(:since))
+               AND (:until IS NULL OR julianday(w.t) < julianday(:until))))
+     ORDER BY chunks_fts.rank, s.started_at DESC, c.first_seq DESC
      LIMIT 50
 ),
 sem AS (
@@ -66,14 +92,28 @@ sem AS (
     -- with one true match would drag 49 strangers into the fusion. The outer
     -- filter drops anything farther than :max_distance (cosine distance;
     -- see search.MaxSemanticDistance) so only real semantic neighbours count.
-    SELECT chunk_id,
-           row_number() OVER (ORDER BY distance) AS r
+    -- k is :sem_k: 50 normally, raised by the app under a date window,
+    -- because KNN can't filter by time itself and the 50 nearest chunks
+    -- project-wide may all fall outside the window.
+    SELECT v.chunk_id,
+           RANK() OVER (ORDER BY v.distance) AS r  -- RANK: equal distances share a rank, so the final ORDER BY breaks the tie by turn time (vec0 allows only distance here)
       FROM (SELECT chunk_id, distance
               FROM chunk_vectors
              WHERE embedding MATCH :query_embedding   -- JSON array or float32 blob
-               AND k = 50
-               AND project_id = :project_id)
-     WHERE distance <= :max_distance
+               AND k = :sem_k
+               AND project_id = :project_id) v
+      JOIN chunks   c ON c.id = v.chunk_id
+      JOIN sessions s ON s.id = c.session_id
+     WHERE v.distance <= :max_distance
+       AND (:since IS NULL OR julianday(COALESCE(s.ended_at, s.started_at)) >= julianday(:since))
+       AND (:until IS NULL OR julianday(s.started_at) < julianday(:until))
+       AND ((:since IS NULL AND :until IS NULL) OR EXISTS (
+             SELECT 1 FROM (SELECT COALESCE(MIN(m.created_at), s.started_at) AS t
+                              FROM messages m
+                             WHERE m.session_id = c.session_id
+                               AND m.seq BETWEEN c.first_seq AND c.last_seq) w
+              WHERE (:since IS NULL OR julianday(w.t) >= julianday(:since))
+               AND (:until IS NULL OR julianday(w.t) < julianday(:until))))
 ),
 fused AS (
     SELECT chunk_id, SUM(1.0 / (60 + r)) AS score
@@ -97,7 +137,7 @@ SELECT f.chunk_id,
   FROM fused f
   JOIN chunks   c ON c.id = f.chunk_id
   JOIN sessions s ON s.id = c.session_id
- ORDER BY f.score DESC
+ ORDER BY f.score DESC, chunk_at DESC   -- RRF ties are common (same rank in one list); newer wins
  LIMIT :limit;
 
 
@@ -110,27 +150,50 @@ SELECT f.chunk_id,
 -- filtered too, for consistency with SearchKeyword's own agent scoping.
 WITH kw AS (
     SELECT c.id AS chunk_id,
-           row_number() OVER (ORDER BY chunks_fts.rank) AS r
+           row_number() OVER (ORDER BY chunks_fts.rank, s.started_at DESC, c.first_seq DESC) AS r  -- ties: newer turn first (not c.id: repair re-inserts old chunks with new ids)
       FROM chunks_fts
       JOIN chunks   c ON c.id = chunks_fts.rowid
       JOIN sessions s ON s.id = c.session_id
      WHERE chunks_fts MATCH :query
        AND s.project_id = :project_id
        AND s.agent = :agent
-     ORDER BY chunks_fts.rank
+       AND (:since IS NULL OR julianday(COALESCE(s.ended_at, s.started_at)) >= julianday(:since))
+       AND (:until IS NULL OR julianday(s.started_at) < julianday(:until))
+       AND ((:since IS NULL AND :until IS NULL) OR EXISTS (
+             SELECT 1 FROM (SELECT COALESCE(MIN(m.created_at), s.started_at) AS t
+                              FROM messages m
+                             WHERE m.session_id = c.session_id
+                               AND m.seq BETWEEN c.first_seq AND c.last_seq) w
+              WHERE (:since IS NULL OR julianday(w.t) >= julianday(:since))
+               AND (:until IS NULL OR julianday(w.t) < julianday(:until))))
+     ORDER BY chunks_fts.rank, s.started_at DESC, c.first_seq DESC
      LIMIT 50
 ),
 sem AS (
     -- Same distance floor as SearchHybrid; see the note there.
-    SELECT chunk_id,
-           row_number() OVER (ORDER BY distance) AS r
+    -- k is :sem_k: 50 normally, raised by the app under a date window,
+    -- because KNN can't filter by time itself and the 50 nearest chunks
+    -- project-wide may all fall outside the window.
+    SELECT v.chunk_id,
+           RANK() OVER (ORDER BY v.distance) AS r  -- RANK: equal distances share a rank, so the final ORDER BY breaks the tie by turn time (vec0 allows only distance here)
       FROM (SELECT chunk_id, distance
               FROM chunk_vectors
              WHERE embedding MATCH :query_embedding   -- JSON array or float32 blob
-               AND k = 50
+               AND k = :sem_k
                AND project_id = :project_id
-               AND agent = :agent)
-     WHERE distance <= :max_distance
+               AND agent = :agent) v
+      JOIN chunks   c ON c.id = v.chunk_id
+      JOIN sessions s ON s.id = c.session_id
+     WHERE v.distance <= :max_distance
+       AND (:since IS NULL OR julianday(COALESCE(s.ended_at, s.started_at)) >= julianday(:since))
+       AND (:until IS NULL OR julianday(s.started_at) < julianday(:until))
+       AND ((:since IS NULL AND :until IS NULL) OR EXISTS (
+             SELECT 1 FROM (SELECT COALESCE(MIN(m.created_at), s.started_at) AS t
+                              FROM messages m
+                             WHERE m.session_id = c.session_id
+                               AND m.seq BETWEEN c.first_seq AND c.last_seq) w
+              WHERE (:since IS NULL OR julianday(w.t) >= julianday(:since))
+               AND (:until IS NULL OR julianday(w.t) < julianday(:until))))
 ),
 fused AS (
     SELECT chunk_id, SUM(1.0 / (60 + r)) AS score
@@ -154,15 +217,20 @@ SELECT f.chunk_id,
   FROM fused f
   JOIN chunks   c ON c.id = f.chunk_id
   JOIN sessions s ON s.id = c.session_id
- ORDER BY f.score DESC
+ ORDER BY f.score DESC, chunk_at DESC   -- RRF ties are common (same rank in one list); newer wins
  LIMIT :limit;
 
 
 -- name: RecentSessions :many
+-- :since/:until select sessions ACTIVE in the window (overlapping it), not
+-- only ones that started in it: a session opened Friday and worked through
+-- Monday belongs to both weeks.
 SELECT *
   FROM v_session_overview
  WHERE project_id = :project_id
    AND (:agent IS NULL OR agent = :agent)
+   AND (:since IS NULL OR julianday(COALESCE(ended_at, started_at)) >= julianday(:since))
+   AND (:until IS NULL OR julianday(started_at) < julianday(:until))
  ORDER BY started_at DESC
  LIMIT :limit;
 
@@ -319,10 +387,15 @@ SELECT n.id, n.kind, n.title, n.body, n.tags, n.agent, n.created_at
 
 
 -- name: PendingEmbeddings :many
--- The embed worker's to-do list.
+-- The embed worker's to-do list. Chunks of a session with no resolved project
+-- are excluded here rather than skipped by the worker: chunk_vectors.project_id
+-- is a partition key and cannot be NULL, and if they were selected they would
+-- fill the LIMIT window, so a batch made only of them would end the drain
+-- while embeddable chunks queued behind them were never reached.
 SELECT c.id, c.text, s.project_id, s.agent, c.session_id
   FROM chunks c
   JOIN sessions s ON s.id = c.session_id
  WHERE c.embedded_at IS NULL
+   AND s.project_id IS NOT NULL
  ORDER BY c.id
  LIMIT :limit;

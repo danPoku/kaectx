@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -125,10 +126,7 @@ func TestRunAllReadsGitHistoryOncePerRepoNotPerLine(t *testing.T) {
 	// A shim ahead of the real git on PATH that records every invocation.
 	bin := t.TempDir()
 	logFile := filepath.Join(bin, "calls.log")
-	shim := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %q\nexec %q \"$@\"\n", logFile, realGit)
-	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(shim), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeGitShim(t, bin, logFile, realGit)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	root := t.TempDir()
@@ -167,6 +165,40 @@ func TestRunAllReadsGitHistoryOncePerRepoNotPerLine(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("git log ran %d times for 120 lines in 3 files, want 1:\n%s", calls, raw)
 	}
+}
+
+func writeGitShim(t *testing.T, bin, logFile, realGit string) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		shim := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %q\nexec %q \"$@\"\n", logFile, realGit)
+		if err := os.WriteFile(filepath.Join(bin, "git"), []byte(shim), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	// Windows cannot execute a shebang shim. Build a tiny native proxy so the
+	// test exercises the same PATH lookup and process boundary as production.
+	source := `package main
+import ("fmt"; "os"; "os/exec"; "strings")
+func main() {
+	f, err := os.OpenFile(os.Getenv("CTX_TEST_GIT_LOG"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil { panic(err) }
+	fmt.Fprintln(f, strings.Join(os.Args[1:], " "))
+	f.Close()
+	c := exec.Command(os.Getenv("CTX_TEST_REAL_GIT"), os.Args[1:]...)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := c.Run(); err != nil { if x, ok := err.(*exec.ExitError); ok { os.Exit(x.ExitCode()) }; panic(err) }
+}`
+	src := filepath.Join(bin, "git-shim.go")
+	if err := os.WriteFile(src, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", "build", "-o", filepath.Join(bin, "git.exe"), src)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build git shim: %v\n%s", err, out)
+	}
+	t.Setenv("CTX_TEST_GIT_LOG", logFile)
+	t.Setenv("CTX_TEST_REAL_GIT", realGit)
 }
 
 // Codex only writes cwd on session_meta/turn_context, and edits arrive as

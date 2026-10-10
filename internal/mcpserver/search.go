@@ -14,9 +14,12 @@ import (
 const defaultSearchLimit = 10
 
 type searchContextArgs struct {
-	Query string `json:"query" jsonschema:"FTS5 keyword query (quote phrases, use AND/OR/NOT) to search across past coding-agent sessions in this project"`
-	Agent string `json:"agent,omitempty" jsonschema:"restrict to one agent's sessions, e.g. claude-code or codex (default: every agent)"`
-	Limit int    `json:"limit,omitempty" jsonschema:"max results, default 10"`
+	Query     string `json:"query" jsonschema:"FTS5 keyword query (quote phrases, use AND/OR/NOT) to search across past coding-agent sessions in this project"`
+	Agent     string `json:"agent,omitempty" jsonschema:"restrict to one agent's sessions, e.g. claude-code or codex (default: every agent)"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"max results, default 10"`
+	RiskAware bool   `json:"risk_aware,omitempty" jsonschema:"rerank using retrieval outcomes once evidence is credible (default false)"`
+	Since     string `json:"since,omitempty" jsonschema:"only turns at or after this time: a UTC date (2026-09-28) or RFC 3339 timestamp"`
+	Until     string `json:"until,omitempty" jsonschema:"only turns before this time; a date means through the end of that day (2026-10-04)"`
 }
 
 type searchContextHit struct {
@@ -29,17 +32,29 @@ type searchContextHit struct {
 	// FirstSeq..LastSeq is the message range of the matching exchange:
 	// get_session(session_id, from_seq=first_seq, to_seq=last_seq) reads
 	// just that, and get_chunk(chunk_id) returns its text directly.
-	FirstSeq int `json:"first_seq"`
-	LastSeq  int `json:"last_seq"`
+	FirstSeq          int     `json:"first_seq"`
+	LastSeq           int     `json:"last_seq"`
+	Reliability       float64 `json:"reliability,omitempty"`
+	PolicyScore       float64 `json:"policy_score,omitempty"`
+	GovernanceNeutral bool    `json:"governance_neutral,omitempty"`
+	OriginalRank      int     `json:"original_rank,omitempty"`
 }
 
 type searchContextResult struct {
 	Results []searchContextHit `json:"results"`
+	// RetrievalRunID can be passed to future feedback/outcome tools without
+	// exposing database rowids or relying on unstable chunk ids.
+	RetrievalRunID    string `json:"retrieval_run_id,omitempty"`
+	TelemetryRecorded bool   `json:"telemetry_recorded"`
 	// UsedSemanticSearch tells the caller whether this ran keyword+semantic
 	// fusion or fell back to keyword-only (no embedding worker has caught
 	// up yet, or the local Ollama isn't reachable) — visible so an agent
 	// doesn't mistake a degraded result set for the real thing.
 	UsedSemanticSearch bool `json:"used_semantic_search"`
+	GovernanceApplied  bool `json:"governance_applied"`
+	// Index says how current the searched index is; read its warning
+	// before concluding that something never happened.
+	Index *indexStatus `json:"index,omitempty"`
 }
 
 type searchNotesArgs struct {
@@ -65,7 +80,9 @@ func (s *server) registerSearch(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "search_context",
 		Description: "Keyword search over past coding-agent sessions in this project — across every agent that's been ingested (Claude Code, Codex, ...), not just the one calling this tool. " +
-			"Returns short snippets, not full transcripts. To read a hit, call get_chunk with its chunk_id (the matching exchange, ~1k tokens), or get_session with its session_id and from_seq/to_seq set to the hit's first_seq/last_seq.",
+			"Returns short snippets, not full transcripts. To read a hit, call get_chunk with its chunk_id (the matching exchange, ~1k tokens), or get_session with its session_id and from_seq/to_seq set to the hit's first_seq/last_seq. " +
+			"For questions about a period (\"what happened last week\"), set since/until: otherwise older, stronger matches outrank the period you asked about. " +
+			"If the result's index.warning is set, ctx has not read some recent logs yet; say so rather than concluding nothing happened.",
 	}, s.searchContext)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -79,16 +96,22 @@ func (s *server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, args
 	if limit <= 0 {
 		limit = defaultSearchLimit
 	}
-	got, err := search.Best(ctx, s.db, s.embedClient, args.Query, s.projectID, args.Agent, limit)
+	w, err := search.ParseWindow(args.Since, args.Until)
 	if err != nil {
 		return nil, searchContextResult{}, err
 	}
-	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid}
+	got, err := search.BestTrackedIn(ctx, s.db, s.embedClient, args.Query, s.projectID, args.Agent, w, limit, "mcp", args.RiskAware)
+	if err != nil {
+		return nil, searchContextResult{}, err
+	}
+	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil, GovernanceApplied: got.GovernanceApplied, Index: s.indexStatus()}
 	for i, r := range got.Results {
 		out.Results[i] = searchContextHit{
 			ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent,
 			StartedAt: r.StartedAt, At: r.At, Snippet: r.Snippet,
 			FirstSeq: r.FirstSeq, LastSeq: r.LastSeq,
+			Reliability: r.Reliability, PolicyScore: r.PolicyScore, GovernanceNeutral: r.GovernanceNeutral,
+			OriginalRank: r.OriginalRank,
 		}
 	}
 	return nil, out, nil

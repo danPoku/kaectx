@@ -6,6 +6,7 @@ package embed
 import (
 	"context"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 )
@@ -18,6 +19,9 @@ import (
 // reachable at the default URL (CI, a machine without it installed) — the
 // mocked tests already cover the client's logic either way.
 func TestOllamaClientLive(t *testing.T) {
+	if os.Getenv("CTX_LIVE_OLLAMA") != "1" {
+		t.Skip("set CTX_LIVE_OLLAMA=1 to run the live Ollama integration test")
+	}
 	probe, err := http.Get(DefaultBaseURL + "/api/tags")
 	if err != nil || probe.StatusCode != http.StatusOK {
 		t.Skipf("no live Ollama at %s, skipping: %v", DefaultBaseURL, err)

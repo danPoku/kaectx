@@ -52,6 +52,28 @@ func TestParseLine(t *testing.T) {
 			line:        `{"timestamp":"2026-09-20T10:00:05Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}`,
 			wantMessage: true, wantRole: "user", wantKind: "text", wantContent: "hello",
 		},
+		// The next four shapes are the common ones in real rollouts that
+		// carry no content_item_kinds (older Codex versions).
+		{
+			name:        "AGENTS.md + environment context with no kinds is injected, not a user turn",
+			line:        `{"timestamp":"2026-09-20T10:00:05Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /home/dev/proj\n\n<INSTRUCTIONS>..."},{"type":"input_text","text":"<environment_context>\n  <cwd>/home/dev/proj</cwd>"}]}}`,
+			wantMessage: true, wantRole: "system", wantKind: "event",
+		},
+		{
+			name:        "turn_aborted notice with no kinds is injected",
+			line:        `{"timestamp":"2026-09-20T10:00:05Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<turn_aborted>\nThe user interrupted the previous turn.\n</turn_aborted>"}]}}`,
+			wantMessage: true, wantRole: "system", wantKind: "event",
+		},
+		{
+			name:        "prompt with images keeps the typed text and drops the <image> wrappers",
+			line:        `{"timestamp":"2026-09-20T10:00:05Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"why is this modal clipped?"},{"type":"input_text","text":"<image>"},{"type":"input_image","image_url":"data:..."},{"type":"input_text","text":"</image>"}]}}`,
+			wantMessage: true, wantRole: "user", wantKind: "text", wantContent: "why is this modal clipped?",
+		},
+		{
+			name:        "per-block kinds: a prompt after injected context is still the user's turn",
+			line:        `{"timestamp":"2026-09-20T10:00:05Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>..."},{"type":"input_text","text":"fix the toast"},{"type":"input_image"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["environments.environment_context","user.text","user.image"]}}}`,
+			wantMessage: true, wantRole: "user", wantKind: "text", wantContent: "fix the toast",
+		},
 		{
 			name:        "assistant text",
 			line:        `{"timestamp":"2026-09-20T10:00:06Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"here you go"}]}}`,

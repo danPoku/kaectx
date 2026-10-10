@@ -270,3 +270,37 @@ func (f *flakyEmbedder) Embed(ctx context.Context, text string) ([]float32, erro
 	}
 	return fixedVector(Dims, 0.1), nil
 }
+
+// A batch that is entirely no-project chunks must not hide the embeddable
+// chunks queued behind it: with batchSize 2 and two orphans first, the old
+// query returned only the orphans, Run processed 0 and Drain stopped.
+func TestDrainReachesEmbeddableChunksBehindNoProjectChunks(t *testing.T) {
+	db := openTestDB(t)
+	seedChunk(t, db, "claude-code:orphan1", false, "no project one")
+	seedChunk(t, db, "claude-code:orphan2", false, "no project two")
+	good := seedChunk(t, db, "claude-code:good", true, "has a project")
+
+	client := &fakeEmbedder{model: "nomic-embed-text"}
+	total, err := Drain(context.Background(), db, client, 2)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("Drain embedded %d, want 1 (the chunk behind the orphans)", total)
+	}
+
+	var embeddedAt sql.NullString
+	if err := db.QueryRow(`SELECT embedded_at FROM chunks WHERE id = ?`, good).Scan(&embeddedAt); err != nil {
+		t.Fatalf("query chunk: %v", err)
+	}
+	if !embeddedAt.Valid {
+		t.Error("embeddable chunk still pending")
+	}
+	var stillPending int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM chunks WHERE embedded_at IS NULL`).Scan(&stillPending); err != nil {
+		t.Fatalf("count pending: %v", err)
+	}
+	if stillPending != 2 {
+		t.Errorf("pending = %d, want 2 (the orphans stay pending)", stillPending)
+	}
+}

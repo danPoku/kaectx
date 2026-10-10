@@ -113,3 +113,116 @@ func TestBestSkipsHybridWithNilClient(t *testing.T) {
 		t.Fatalf("Results = %d, want 1", len(got.Results))
 	}
 }
+
+func TestBestTrackedRecordsReturnedOrderWithoutChangingSearch(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "ctx.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	if _, err := store.Migrate(db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	fixture, err := os.ReadFile("../ingest/claudecode/testdata/session.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, fixture, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ingest.Run(db, claudecode.New(), path); err != nil {
+		t.Fatal(err)
+	}
+	projectID, err := store.ResolveProject(db, "/home/dev/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := search.BestTracked(context.Background(), db, nil, "WAL", projectID, "", 10, "mcp")
+	if err != nil {
+		t.Fatalf("BestTracked: %v", err)
+	}
+	if got.RunID == "" || got.TelemetryErr != nil {
+		t.Fatalf("telemetry = (%q, %v), want a run id and no error", got.RunID, got.TelemetryErr)
+	}
+	if len(got.Results) != 1 {
+		t.Fatalf("results = %d, want 1", len(got.Results))
+	}
+
+	var query, surface, mode string
+	var count int
+	if err := db.QueryRow(`SELECT query, surface, mode, result_count FROM retrieval_runs WHERE id=?`, got.RunID).Scan(&query, &surface, &mode, &count); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if query != "WAL" || surface != "mcp" || mode != "keyword" || count != 1 {
+		t.Errorf("run = (%q,%q,%q,%d), want (WAL,mcp,keyword,1)", query, surface, mode, count)
+	}
+	var rank int
+	var evidence, scoreKind string
+	var chunkID int64
+	if err := db.QueryRow(`SELECT rank, evidence_key, chunk_id, score_kind FROM retrieval_candidates WHERE run_id=?`, got.RunID).Scan(&rank, &evidence, &chunkID, &scoreKind); err != nil {
+		t.Fatalf("read candidate: %v", err)
+	}
+	if rank != 1 || len(evidence) != 64 || chunkID != got.Results[0].ChunkID || scoreKind != "bm25" {
+		t.Errorf("candidate = rank %d evidence %q chunk %d kind %q", rank, evidence, chunkID, scoreKind)
+	}
+}
+
+func TestBestTrackedTelemetryFailureDoesNotFailSearch(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "ctx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	fixture, _ := os.ReadFile("../ingest/claudecode/testdata/session.jsonl")
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, fixture, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ingest.Run(db, claudecode.New(), path); err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := store.ResolveProject(db, "/home/dev/proj")
+
+	got, err := search.BestTracked(context.Background(), db, nil, "WAL", projectID, "", 10, "invalid-surface")
+	if err != nil {
+		t.Fatalf("search failed with telemetry: %v", err)
+	}
+	if len(got.Results) != 1 || got.TelemetryErr == nil || got.RunID != "" {
+		t.Fatalf("results=%d telemetry=(%q,%v), want successful search and failed telemetry", len(got.Results), got.RunID, got.TelemetryErr)
+	}
+}
+
+func TestBestTrackedNormalizesNonPositiveLimit(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "ctx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	projectID, err := store.ResolveProject(db, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := search.BestTracked(context.Background(), db, nil, "nothing", projectID, "", 0, "internal")
+	if err != nil || got.TelemetryErr != nil || got.RunID == "" {
+		t.Fatalf("BestTracked = run %q telemetry %v search %v", got.RunID, got.TelemetryErr, err)
+	}
+	var limit int
+	if err := db.QueryRow(`SELECT requested_limit FROM retrieval_runs WHERE id=?`, got.RunID).Scan(&limit); err != nil {
+		t.Fatal(err)
+	}
+	if limit != 10 {
+		t.Errorf("requested_limit = %d, want normalized default 10", limit)
+	}
+}
