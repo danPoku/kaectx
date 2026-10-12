@@ -4,7 +4,7 @@
 
 ### One local memory for every coding agent on your machine.
 
-**Claude Code and Codex can search each other's past sessions. Nothing leaves your machine.**
+**Claude Code and Codex can search each other's past sessions. Nothing leaves the machine it runs on.**
 
 [![Release](https://img.shields.io/github/v/release/danPoku/kaectx?label=release&color=2ea44f)](https://github.com/danPoku/kaectx/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/danPoku/kaectx/test.yml?branch=master&label=CI)](https://github.com/danPoku/kaectx/actions/workflows/test.yml)
@@ -13,7 +13,7 @@
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20WSL2%20%7C%20Windows-0969da)](#install)
 [![License](https://img.shields.io/github/license/danPoku/kaectx?color=yellow)](LICENSE)
 
-[Quick start](#quick-start) · [How it works](#how-it-works) · [MCP tools](#tools) · [Commands](#commands) · [Privacy](#privacy) · [Limitations](#limitations) · [Contributing](CONTRIBUTING.md)
+[Quick start](#quick-start) · [How it works](#how-it-works) · [Remote development](#remote-and-cloud-development) · [MCP tools](#tools) · [Commands](#commands) · [Privacy](#privacy) · [Limitations](#limitations) · [Contributing](CONTRIBUTING.md)
 
 ```
 go install -tags sqlite_fts5 github.com/danPoku/kaectx/cmd/ctx@latest
@@ -241,6 +241,24 @@ is picked up by the next scan.
 
 Daemon flags: `--embed-interval` (set to `0` to turn embedding off),
 `--embed-batch`, `--ollama-url`, `--model`, `--fallback-interval`, `--debounce`.
+
+## Remote and cloud development
+
+If your agents run on a VPS, a remote dev box you reach over SSH, or a
+Codespace, install ctx on that machine too. It works the same way there: it
+reads the session logs of the agents running on that machine, keeps the
+catalogue in that machine's `~/.ctx/ctx.db`, and the agents start `ctx mcp`
+there. Transcripts stay on the server you control, and they never pass
+through a third-party service.
+
+Run Ollama on the same machine for semantic search. `ctx search` and
+`ctx mcp` expect it on `localhost:11434`. Without it, search is keyword-only.
+
+ctx is not a shared or network service. `ctx mcp` speaks MCP over stdio to
+the agent that started it, and has no port and no authentication. Each machine
+keeps its own catalogue, so sessions on your laptop and on your server are
+searched separately. Projects are identified by their git remote, not their
+path, so the same repository is recognised as one project on each machine.
 
 ## Connecting agents
 
