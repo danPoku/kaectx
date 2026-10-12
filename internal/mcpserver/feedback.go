@@ -158,45 +158,54 @@ func (s *server) feedbackStatus(_ context.Context, _ *mcp.CallToolRequest, args 
 	if err := rows.Close(); err != nil {
 		return nil, out, err
 	}
-	remaining := limit - len(out.Nudges)
-	if remaining > 0 {
-		// A result opened only by inferred reads may be credited to the wrong
-		// search, so its nudge says so instead of claiming high confidence.
-		rows, err = s.db.Query(`SELECT rc.run_id, rc.rank, rr.query,
-				rc.inferred_open_count>0 AND rc.inferred_open_count=rc.open_count
-			FROM retrieval_candidates rc JOIN retrieval_runs rr ON rr.id=rc.run_id
-			WHERE rr.project_id=? AND rc.opened_at IS NOT NULL
-			AND NOT EXISTS (SELECT 1 FROM memory_observations mo
-				WHERE mo.run_id=rc.run_id AND mo.candidate_rank=rc.rank)
-			ORDER BY rc.opened_at DESC LIMIT ?`, s.projectID, remaining)
+	if remaining := limit - len(out.Nudges); remaining > 0 {
+		pending, err := s.pendingRetrievalNudges(remaining)
 		if err != nil {
 			return nil, out, err
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var runID, query string
-			var rank int
-			var inferredOnly bool
-			if err := rows.Scan(&runID, &rank, &query, &inferredOnly); err != nil {
-				return nil, out, err
-			}
-			nudge := feedbackNudge{
-				Kind: "retrieval_outcome_missing", Source: "opened_result", Confidence: "high",
-				Prompt: "If this retrieved evidence influenced the work, record its honest outcome; opening it alone is not a helpful label.",
-				RunID:  runID, Rank: rank, Query: query,
-			}
-			if inferredOnly {
-				nudge.Source, nudge.Confidence = "inferred_open", "medium"
-				nudge.Prompt = "This open was matched to a search from the chunk alone. If you ran this query and the evidence influenced the work, record its honest outcome; otherwise skip it."
-			}
-			out.Nudges = append(out.Nudges, nudge)
-		}
-		if err := rows.Err(); err != nil {
-			return nil, out, err
-		}
+		out.Nudges = append(out.Nudges, pending...)
 	}
 	out.Pending = len(out.Nudges)
 	return nil, out, nil
+}
+
+// pendingRetrievalNudges lists opened results that have no outcome yet,
+// newest open first, up to limit. feedback_status and checkpoint_status both
+// use it, so the two can never disagree about what is pending.
+func (s *server) pendingRetrievalNudges(limit int) ([]feedbackNudge, error) {
+	// A result opened only by inferred reads may be credited to the wrong
+	// search, so its nudge says so instead of claiming high confidence.
+	rows, err := s.db.Query(`SELECT rc.run_id, rc.rank, rr.query,
+			rc.inferred_open_count>0 AND rc.inferred_open_count=rc.open_count
+		FROM retrieval_candidates rc JOIN retrieval_runs rr ON rr.id=rc.run_id
+		WHERE rr.project_id=? AND rc.opened_at IS NOT NULL
+		AND NOT EXISTS (SELECT 1 FROM memory_observations mo
+			WHERE mo.run_id=rc.run_id AND mo.candidate_rank=rc.rank)
+		ORDER BY rc.opened_at DESC LIMIT ?`, s.projectID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	nudges := []feedbackNudge{}
+	for rows.Next() {
+		var runID, query string
+		var rank int
+		var inferredOnly bool
+		if err := rows.Scan(&runID, &rank, &query, &inferredOnly); err != nil {
+			return nil, err
+		}
+		nudge := feedbackNudge{
+			Kind: "retrieval_outcome_missing", Source: "opened_result", Confidence: "high",
+			Prompt: "If this retrieved evidence influenced the work, record its honest outcome; opening it alone is not a helpful label.",
+			RunID:  runID, Rank: rank, Query: query,
+		}
+		if inferredOnly {
+			nudge.Source, nudge.Confidence = "inferred_open", "medium"
+			nudge.Prompt = "This open was matched to a search from the chunk alone. If you ran this query and the evidence influenced the work, record its honest outcome; otherwise skip it."
+		}
+		nudges = append(nudges, nudge)
+	}
+	return nudges, rows.Err()
 }
 
 func (s *server) recordCheckpointOutcome(_ context.Context, _ *mcp.CallToolRequest, args checkpointOutcomeArgs) (*mcp.CallToolResult, checkpointOutcomeResult, error) {
