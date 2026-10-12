@@ -68,6 +68,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "ctx audit-secrets:", err)
 			os.Exit(1)
 		}
+	case "feedback":
+		if err := runFeedback(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "ctx feedback:", err)
+			os.Exit(1)
+		}
 	case "doctor":
 		if err := runDoctor(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "ctx doctor:", err)
@@ -95,6 +100,7 @@ commands:
   ingest [--path FILE] [--agent A]    ingest sessions (default: scan Claude Code + Codex session dirs)
   embed [--batch N]                   embed pending chunks via a local Ollama for semantic search
   search <query> [--agent A] [--limit N] [--since D] [--until D] [--risk-aware]   search ingested sessions in this project
+  feedback <run_id> <rank> <outcome> [--note T]   label a search hit by its run and rank: helpful, unhelpful, stale, incorrect or superseded
   explain <path> [--limit N]          show sessions, actions and git span for a project-relative file
   repair git [--dry-run]              re-derive git commit spans and repo-root file paths for sessions ingested by older versions
   repair touches [--dry-run]          backfill file records for Codex apply_patch calls ingested before ctx read them

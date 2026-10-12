@@ -5,12 +5,11 @@ package mcpserver
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/danPoku/kaectx/internal/governance"
+	"github.com/danPoku/kaectx/internal/feedback"
 	"github.com/danPoku/kaectx/internal/redact"
 )
 
@@ -27,6 +26,9 @@ type recordOutcomeResult struct {
 	Observations int     `json:"observations"`
 	Reliability  float64 `json:"reliability"`
 	Neutral      bool    `json:"neutral"`
+	// AssessmentError is set when the outcome was recorded but re-assessing
+	// the evidence failed. The label is stored; do not record it again.
+	AssessmentError string `json:"assessment_error,omitempty"`
 }
 
 type feedbackStatusArgs struct {
@@ -61,11 +63,6 @@ type checkpointOutcomeResult struct {
 	Outcome   string `json:"outcome"`
 }
 
-var validOutcomes = map[string]bool{
-	"helpful": true, "unhelpful": true, "stale": true,
-	"incorrect": true, "superseded": true,
-}
-
 var validCheckpointOutcomes = map[string]bool{
 	"started_new_session": true, "saved_handoff": true,
 	"continued": true, "dismissed": true,
@@ -87,41 +84,18 @@ func (s *server) registerFeedback(srv *mcp.Server) {
 }
 
 func (s *server) recordRetrievalOutcome(_ context.Context, _ *mcp.CallToolRequest, args recordOutcomeArgs) (*mcp.CallToolResult, recordOutcomeResult, error) {
-	if !validOutcomes[args.Outcome] {
-		return nil, recordOutcomeResult{}, fmt.Errorf("a valid outcome is required")
-	}
-	if args.RunID == "" || args.Rank <= 0 {
-		return nil, recordOutcomeResult{}, fmt.Errorf("run_id and a positive rank are required")
-	}
-	// The candidate's range is the exchange as the agent saw it. Its first
-	// seq anchors the label, so the label keeps counting if the chunk is
-	// later rebuilt with different bounds.
-	var e governance.Evidence
-	err := s.db.QueryRow(`SELECT rc.evidence_key, rc.session_id, rc.first_seq, rc.last_seq
-		FROM retrieval_candidates rc JOIN retrieval_runs rr ON rr.id=rc.run_id
-		WHERE rc.run_id=? AND rc.rank=? AND rr.project_id=?`, args.RunID, args.Rank, s.projectID).Scan(&e.Key, &e.SessionID, &e.FirstSeq, &e.LastSeq)
-	if err == sql.ErrNoRows {
-		return nil, recordOutcomeResult{}, fmt.Errorf("retrieval result not found in this project")
-	}
+	got, err := feedback.Record(s.db, s.projectID, args.RunID, args.Rank, args.Outcome, args.Note)
 	if err != nil {
 		return nil, recordOutcomeResult{}, err
 	}
-	var note any
-	if args.Note != "" {
-		note = redact.Redact(args.Note)
+	out := recordOutcomeResult{Recorded: true, EvidenceKey: got.Evidence.Key,
+		Observations: got.Assessment.Observations, Reliability: got.Assessment.Reliability, Neutral: got.Assessment.Neutral}
+	if got.AssessErr != nil {
+		// The label is stored; only the follow-up assessment failed.
+		out.Reliability, out.Neutral = 1, true
+		out.AssessmentError = got.AssessErr.Error()
 	}
-	if _, err := s.db.Exec(`INSERT INTO memory_observations(project_id,evidence_key,session_id,anchor_seq,run_id,candidate_rank,outcome,note)
-		VALUES (?,?,?,?,?,?,?,?)
-		ON CONFLICT(run_id,candidate_rank) WHERE run_id IS NOT NULL DO UPDATE SET
-			outcome=excluded.outcome, note=excluded.note,
-			created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, s.projectID, e.Key, e.SessionID, e.FirstSeq, args.RunID, args.Rank, args.Outcome, note); err != nil {
-		return nil, recordOutcomeResult{}, err
-	}
-	a, err := governance.Assess(s.db, s.projectID, e)
-	if err != nil {
-		return nil, recordOutcomeResult{}, err
-	}
-	return nil, recordOutcomeResult{Recorded: true, EvidenceKey: e.Key, Observations: a.Observations, Reliability: a.Reliability, Neutral: a.Neutral}, nil
+	return nil, out, nil
 }
 
 func (s *server) feedbackStatus(_ context.Context, _ *mcp.CallToolRequest, args feedbackStatusArgs) (*mcp.CallToolResult, feedbackStatusResult, error) {
