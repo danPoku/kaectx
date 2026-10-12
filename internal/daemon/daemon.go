@@ -46,6 +46,11 @@ type Source struct {
 // on every single Write event would be wasteful. Exposed as a parameter
 // (rather than a hardcoded constant) mainly so tests aren't stuck waiting
 // out a production-sized delay.
+// afterInitialScan runs once the startup scan finishes. It does nothing in
+// production; a test sets it to write at exactly the moment a startup race
+// would lose the write.
+var afterInitialScan = func() {}
+
 func Run(ctx context.Context, db *sql.DB, sources []Source, fallbackInterval, debounceDelay time.Duration) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -53,10 +58,18 @@ func Run(ctx context.Context, db *sql.DB, sources []Source, fallbackInterval, de
 	}
 	defer watcher.Close()
 
+	// Watch first, then scan. The other order left a gap: a line appended
+	// after the scan read its file but before the watch was in place raised
+	// no event and waited for the fallback tick, up to an hour. With the
+	// watch already up, such a write raises an event; if the scan also saw
+	// it, ingest's byte offsets make the second read a no-op.
 	for _, src := range sources {
-		runAllLogged(db, src)
 		addWatchesRecursive(watcher, src.Root)
 	}
+	for _, src := range sources {
+		runAllLogged(db, src)
+	}
+	afterInitialScan()
 
 	debounce := newDebouncer(debounceDelay)
 	defer debounce.stop()
