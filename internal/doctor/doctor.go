@@ -98,18 +98,21 @@ func Collect(ctx context.Context, db *sql.DB, projectID int64) (Report, error) {
 		Scan(&r.RecentOpenedResults, &r.RecentInferredOpens, &r.RecentLabelledOpens); err != nil {
 		return r, fmt.Errorf("read retrieval feedback funnel: %w", err)
 	}
-	if err := db.QueryRowContext(ctx, `WITH retrieved AS (
-		SELECT DISTINCT rc.evidence_key FROM retrieval_candidates rc
-		JOIN retrieval_runs rr ON rr.id=rc.run_id WHERE rr.project_id=?
+	// Coverage counts labels by governance's own matching rule, so a label
+	// that follows its exchange across rechunking counts here too.
+	if err := db.QueryRowContext(ctx, `WITH c(k, s, f, l) AS (
+		SELECT rc.evidence_key, MIN(rc.session_id), MIN(rc.first_seq), MIN(rc.last_seq)
+		FROM retrieval_candidates rc JOIN retrieval_runs rr ON rr.id=rc.run_id
+		WHERE rr.project_id=? GROUP BY rc.evidence_key
 	), observed AS (
-		SELECT evidence_key, COUNT(*) AS n FROM memory_observations
-		WHERE project_id=? GROUP BY evidence_key
+		SELECT c.k, COUNT(*) AS n FROM c JOIN memory_observations mo ON `+governance.MatchObservationsSQL()+`
+		GROUP BY c.k
 	)
 	SELECT
 		(SELECT COUNT(*) FROM memory_observations WHERE project_id=?),
-		(SELECT COUNT(*) FROM retrieved),
-		(SELECT COUNT(*) FROM observed JOIN retrieved USING(evidence_key)),
-		(SELECT COUNT(*) FROM observed JOIN retrieved USING(evidence_key) WHERE observed.n>=?)`,
+		(SELECT COUNT(*) FROM c),
+		(SELECT COUNT(*) FROM observed),
+		(SELECT COUNT(*) FROM observed WHERE n>=?)`,
 		projectID, projectID, projectID, governance.MinCredibleObservations).Scan(&r.Outcomes, &r.RetrievedEvidence, &r.ObservedEvidence, &r.CredibleEvidence); err != nil {
 		return r, fmt.Errorf("read outcome coverage: %w", err)
 	}

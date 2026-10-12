@@ -202,6 +202,18 @@ func TestRecordRetrievalOutcomeUsesRunAndRank(t *testing.T) {
 	if strings.Contains(note, fakeSecret) || !strings.Contains(note, "[REDACTED]") {
 		t.Errorf("stored note was not redacted: %q", note)
 	}
+	// The label is anchored to the labelled exchange's first message, so it
+	// survives the chunk being rebuilt with other bounds.
+	var anchorSession string
+	var anchorSeq, candidateFirst int
+	if err := db.QueryRow(`SELECT mo.session_id, mo.anchor_seq, rc.first_seq FROM memory_observations mo
+		JOIN retrieval_candidates rc ON rc.run_id = mo.run_id AND rc.rank = mo.candidate_rank
+		ORDER BY mo.id LIMIT 1`).Scan(&anchorSession, &anchorSeq, &candidateFirst); err != nil {
+		t.Fatal(err)
+	}
+	if anchorSession != "claude-code:sess-1" || anchorSeq != candidateFirst {
+		t.Errorf("anchor = %s@%d, want claude-code:sess-1@%d", anchorSession, anchorSeq, candidateFirst)
+	}
 
 	// A second opinion from the same retrieval replaces that opinion instead
 	// of manufacturing another observation.

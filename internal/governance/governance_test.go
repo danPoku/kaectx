@@ -46,7 +46,7 @@ func TestAssessReliability(t *testing.T) {
 				}
 			}
 		}
-		a, err := governance.Assess(db, projectID, "e")
+		a, err := governance.Assess(db, projectID, governance.Evidence{Key: "e"})
 		db.Close()
 		if err != nil {
 			t.Fatal(err)
@@ -71,7 +71,7 @@ func TestAssessStaysNeutralUntilEvidenceIsCredible(t *testing.T) {
 		t.Fatal(err)
 	}
 	projectID, _ := res.LastInsertId()
-	empty, err := governance.Assess(db, projectID, "never-observed")
+	empty, err := governance.Assess(db, projectID, governance.Evidence{Key: "never-observed"})
 	if err != nil {
 		t.Fatalf("empty assessment: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestAssessStaysNeutralUntilEvidenceIsCredible(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	a, err := governance.Assess(db, projectID, "e")
+	a, err := governance.Assess(db, projectID, governance.Evidence{Key: "e"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestAssessStaysNeutralUntilEvidenceIsCredible(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO memory_observations(project_id,evidence_key,outcome) VALUES (?,?,?)`, projectID, "e", "incorrect"); err != nil {
 		t.Fatal(err)
 	}
-	a, err = governance.Assess(db, projectID, "e")
+	a, err = governance.Assess(db, projectID, governance.Evidence{Key: "e"})
 	if err != nil {
 		t.Fatal(err)
 	}

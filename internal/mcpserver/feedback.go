@@ -93,10 +93,13 @@ func (s *server) recordRetrievalOutcome(_ context.Context, _ *mcp.CallToolReques
 	if args.RunID == "" || args.Rank <= 0 {
 		return nil, recordOutcomeResult{}, fmt.Errorf("run_id and a positive rank are required")
 	}
-	var evidenceKey string
-	err := s.db.QueryRow(`SELECT rc.evidence_key
+	// The candidate's range is the exchange as the agent saw it. Its first
+	// seq anchors the label, so the label keeps counting if the chunk is
+	// later rebuilt with different bounds.
+	var e governance.Evidence
+	err := s.db.QueryRow(`SELECT rc.evidence_key, rc.session_id, rc.first_seq, rc.last_seq
 		FROM retrieval_candidates rc JOIN retrieval_runs rr ON rr.id=rc.run_id
-		WHERE rc.run_id=? AND rc.rank=? AND rr.project_id=?`, args.RunID, args.Rank, s.projectID).Scan(&evidenceKey)
+		WHERE rc.run_id=? AND rc.rank=? AND rr.project_id=?`, args.RunID, args.Rank, s.projectID).Scan(&e.Key, &e.SessionID, &e.FirstSeq, &e.LastSeq)
 	if err == sql.ErrNoRows {
 		return nil, recordOutcomeResult{}, fmt.Errorf("retrieval result not found in this project")
 	}
@@ -107,18 +110,18 @@ func (s *server) recordRetrievalOutcome(_ context.Context, _ *mcp.CallToolReques
 	if args.Note != "" {
 		note = redact.Redact(args.Note)
 	}
-	if _, err := s.db.Exec(`INSERT INTO memory_observations(project_id,evidence_key,run_id,candidate_rank,outcome,note)
-		VALUES (?,?,?,?,?,?)
+	if _, err := s.db.Exec(`INSERT INTO memory_observations(project_id,evidence_key,session_id,anchor_seq,run_id,candidate_rank,outcome,note)
+		VALUES (?,?,?,?,?,?,?,?)
 		ON CONFLICT(run_id,candidate_rank) WHERE run_id IS NOT NULL DO UPDATE SET
 			outcome=excluded.outcome, note=excluded.note,
-			created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, s.projectID, evidenceKey, args.RunID, args.Rank, args.Outcome, note); err != nil {
+			created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, s.projectID, e.Key, e.SessionID, e.FirstSeq, args.RunID, args.Rank, args.Outcome, note); err != nil {
 		return nil, recordOutcomeResult{}, err
 	}
-	a, err := governance.Assess(s.db, s.projectID, evidenceKey)
+	a, err := governance.Assess(s.db, s.projectID, e)
 	if err != nil {
 		return nil, recordOutcomeResult{}, err
 	}
-	return nil, recordOutcomeResult{Recorded: true, EvidenceKey: evidenceKey, Observations: a.Observations, Reliability: a.Reliability, Neutral: a.Neutral}, nil
+	return nil, recordOutcomeResult{Recorded: true, EvidenceKey: e.Key, Observations: a.Observations, Reliability: a.Reliability, Neutral: a.Neutral}, nil
 }
 
 func (s *server) feedbackStatus(_ context.Context, _ *mcp.CallToolRequest, args feedbackStatusArgs) (*mcp.CallToolResult, feedbackStatusResult, error) {

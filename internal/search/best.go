@@ -6,17 +6,16 @@ package search
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/danPoku/kaectx/internal/embed"
 	"github.com/danPoku/kaectx/internal/governance"
 	"github.com/danPoku/kaectx/internal/redact"
+	"github.com/danPoku/kaectx/internal/store"
 )
 
 const (
@@ -141,10 +140,12 @@ func BestTrackedIn(ctx context.Context, db *sql.DB, client embed.Embedder, query
 
 func applyGovernance(ctx context.Context, db *sql.DB, projectID int64, results []Result) error {
 	keys := make([]string, len(results))
-	for i := range results {
-		keys[i] = evidenceKey(results[i])
+	evidence := make([]governance.Evidence, len(results))
+	for i, r := range results {
+		keys[i] = evidenceKey(r)
+		evidence[i] = governance.Evidence{Key: keys[i], SessionID: r.SessionID, FirstSeq: r.FirstSeq, LastSeq: r.LastSeq}
 	}
-	assessments, err := governance.AssessMany(ctx, db, projectID, keys)
+	assessments, err := governance.AssessMany(ctx, db, projectID, evidence)
 	if err != nil {
 		return err
 	}
@@ -266,9 +267,7 @@ func newRunID() (string, error) {
 }
 
 func evidenceKey(r Result) string {
-	s := r.SessionID + "\x00" + strconv.Itoa(r.FirstSeq) + "\x00" + strconv.Itoa(r.LastSeq)
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])
+	return store.EvidenceKey(r.SessionID, r.FirstSeq, r.LastSeq)
 }
 
 func toResults(kw []KeywordResult) []Result {

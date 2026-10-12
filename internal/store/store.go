@@ -115,6 +115,9 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := migrateInferredOpens(db); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := migrateEvidenceAnchors(db); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
 }
 
