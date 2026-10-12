@@ -389,7 +389,8 @@ first_seq and last_seq rather than paging from the start.
 | `ctx init` | Create `~/.ctx` and the database. Other commands do this too if needed. |
 | `ctx ingest [--path FILE] [--agent A]` | One-shot ingest of the default directories, or of a single file. |
 | `ctx embed [--batch N]` | Embed pending chunks through Ollama. |
-| `ctx search <query> [--agent A] [--limit N] [--since D] [--until D] [--risk-aware]` | Search the current project. `--risk-aware` reranks using recorded retrieval outcomes. |
+| `ctx search <query> [--agent A] [--limit N] [--since D] [--until D] [--risk-aware]` | Search the current project. `--risk-aware` reranks using recorded retrieval outcomes. Output starts with the search's run ID and numbers each hit. |
+| `ctx feedback <run_id> <rank> <outcome> [--note TEXT]` | Label a `ctx search` hit as helpful, unhelpful, stale, incorrect or superseded, the CLI counterpart of `record_retrieval_outcome`. A second label for the same hit replaces the first. |
 | `ctx explain <path> [--limit N]` | Show sessions, actions and git span for a project-relative file. |
 | `ctx repair git\|touches\|messages [--dry-run]` | Bring data ingested by older versions up to date (see [Quick start](#quick-start)). |
 | `ctx project list` | Show projects, their remotes, session counts and known paths. |

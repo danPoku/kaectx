@@ -135,6 +135,12 @@ func BestTrackedIn(ctx context.Context, db *sql.DB, client embed.Embedder, query
 	telemetryCtx, cancel := context.WithTimeout(context.Background(), telemetryWriteTimeout)
 	defer cancel()
 	got.RunID, got.TelemetryErr = recordRetrieval(telemetryCtx, db, query, projectID, agent, limit, surface, time.Since(started), got)
+	if got.TelemetryErr != nil {
+		// recordRetrieval returns its run ID alongside a failed commit, but
+		// then no such run exists. Callers offer RunID for labelling, so it
+		// must name a stored run or nothing.
+		got.RunID = ""
+	}
 	return got, nil
 }
 

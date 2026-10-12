@@ -80,12 +80,28 @@ func runSearch(args []string) error {
 				f.PendingFiles, f.OldestPendingAt)
 		}
 	}
-	if len(got.Results) == 0 {
-		fmt.Println("no results")
-		return nil
-	}
-	for _, r := range got.Results {
-		fmt.Printf("[%s] %s  %s  seq %d-%d\n    %s\n\n", r.Agent, r.At, r.SessionID, r.FirstSeq, r.LastSeq, r.Snippet)
-	}
+	fmt.Print(formatSearch(got))
 	return nil
+}
+
+// formatSearch prints a search's hits. When the search was recorded, it leads
+// with the run ID and numbers each hit, which is what `ctx feedback` needs to
+// label one. When telemetry failed there is no run to label, so neither the
+// run line nor the ranks appear.
+func formatSearch(got search.BestResult) string {
+	if len(got.Results) == 0 {
+		return "no results\n"
+	}
+	var b strings.Builder
+	labellable := got.RunID != "" && got.TelemetryErr == nil
+	if labellable {
+		b.WriteString(labelHint(got.RunID) + "\n\n")
+	}
+	for i, r := range got.Results {
+		if labellable {
+			fmt.Fprintf(&b, "#%d ", i+1)
+		}
+		fmt.Fprintf(&b, "[%s] %s  %s  seq %d-%d\n    %s\n\n", r.Agent, r.At, r.SessionID, r.FirstSeq, r.LastSeq, r.Snippet)
+	}
+	return b.String()
 }
