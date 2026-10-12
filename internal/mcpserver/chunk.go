@@ -169,12 +169,28 @@ func (s *server) inferOpenTarget(chunkID int64) (runID string, rank int, ok bool
 	return found[0].runID, found[0].rank, true
 }
 
-// recordOpen marks one candidate as opened and reports whether it did. It is
+// recordOpen marks one candidate as opened and reports whether it did. The
+// candidate's counters and last-open time move, and the open is appended to
+// retrieval_open_events, in one transaction, so the two never disagree. It is
 // fail-open: an observer failure must never hide context that was read
 // successfully, so errors only mean the open goes unrecorded.
 func (s *server) recordOpen(runID string, rank int, chunkID int64, inferred bool) bool {
-	result, err := s.db.Exec(`UPDATE retrieval_candidates
-		SET opened_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), open_count=open_count+1,
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false
+	}
+	defer tx.Rollback()
+	// opened_at has millisecond resolution, so two opens inside one
+	// millisecond would share a time. Each open is therefore placed at least
+	// 1ms after the result's previous open: times stay distinct and in order,
+	// and are off by at most a millisecond per open in a burst.
+	result, err := tx.Exec(`UPDATE retrieval_candidates
+		SET opened_at=CASE
+				WHEN opened_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ','now') > opened_at
+				THEN strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				ELSE strftime('%Y-%m-%dT%H:%M:%fZ', opened_at, '+0.001 seconds')
+			END,
+			open_count=open_count+1,
 			inferred_open_count=inferred_open_count+?
 		WHERE run_id=? AND rank=? AND chunk_id=? AND EXISTS (
 			SELECT 1 FROM retrieval_runs rr WHERE rr.id=retrieval_candidates.run_id AND rr.project_id=?
@@ -182,6 +198,15 @@ func (s *server) recordOpen(runID string, rank int, chunkID int64, inferred bool
 	if err != nil {
 		return false
 	}
-	affected, err := result.RowsAffected()
-	return err == nil && affected == 1
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		return false
+	}
+	// The event takes the candidate's new opened_at so both name the same
+	// instant.
+	if _, err := tx.Exec(`INSERT INTO retrieval_open_events(run_id, rank, opened_at, inferred)
+		SELECT run_id, rank, opened_at, ? FROM retrieval_candidates WHERE run_id=? AND rank=?`,
+		inferred, runID, rank); err != nil {
+		return false
+	}
+	return tx.Commit() == nil
 }

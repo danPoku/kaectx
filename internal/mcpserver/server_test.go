@@ -562,6 +562,73 @@ func inferredRead(t *testing.T, cs *sdkmcp.ClientSession, chunkID int64) (record
 	return out.OpenRecorded, runID
 }
 
+// TestGetChunkKeepsEveryOpen is the regression test for issue #20: each open
+// used to overwrite the candidate's opened_at, so only the last survived.
+func TestGetChunkKeepsEveryOpen(t *testing.T) {
+	cs, db := testServer(t)
+	var hit struct {
+		RunID   string `json:"run_id"`
+		Results []struct {
+			ChunkID int64 `json:"chunk_id"`
+		} `json:"results"`
+	}
+	callTool(t, cs, "search_context", map[string]any{"query": "WAL"}, &hit)
+	exact := map[string]any{"chunk_id": hit.Results[0].ChunkID, "run_id": hit.RunID, "rank": 1}
+	// No pauses between calls: opens landing in the same millisecond must
+	// still get distinct, ordered times.
+	var out struct{}
+	callTool(t, cs, "get_chunk", exact, &out)
+	callTool(t, cs, "get_chunk", exact, &out)
+	callTool(t, cs, "get_chunk", map[string]any{"chunk_id": hit.Results[0].ChunkID}, &out) // inferred
+
+	rows, err := db.Query(`SELECT opened_at, inferred, backfilled FROM retrieval_open_events
+		WHERE run_id = ? AND rank = 1 ORDER BY id`, hit.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	type event struct {
+		at                   string
+		inferred, backfilled bool
+	}
+	var got []event
+	for rows.Next() {
+		var e event
+		if err := rows.Scan(&e.at, &e.inferred, &e.backfilled); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, e)
+	}
+	if len(got) != 3 {
+		t.Fatalf("open events = %+v, want 3", got)
+	}
+	if !(got[0].at < got[1].at && got[1].at < got[2].at) {
+		t.Errorf("open times = %s, %s, %s; want distinct and increasing", got[0].at, got[1].at, got[2].at)
+	}
+	var last string
+	if err := db.QueryRow(`SELECT opened_at FROM retrieval_candidates WHERE run_id = ? AND rank = 1`, hit.RunID).Scan(&last); err != nil {
+		t.Fatal(err)
+	}
+	if last != got[2].at {
+		t.Errorf("candidate opened_at = %s, want the last event's %s", last, got[2].at)
+	}
+	if got[0].inferred || got[1].inferred || !got[2].inferred || got[0].backfilled {
+		t.Errorf("events = %+v, want exact, exact, inferred and none backfilled", got)
+	}
+
+	// Events go with their run when retention prunes it.
+	if _, err := db.Exec(`DELETE FROM retrieval_runs WHERE id = ?`, hit.RunID); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM retrieval_open_events WHERE run_id = ?`, hit.RunID).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 {
+		t.Errorf("%d open events outlived their run, want 0", left)
+	}
+}
+
 // TestGetChunkInferenceAbstains covers the cases where a chunk_id-only read
 // must record nothing rather than guess which search it came from.
 func TestGetChunkInferenceAbstains(t *testing.T) {

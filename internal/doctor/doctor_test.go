@@ -67,11 +67,12 @@ func TestCollectReportsCorpusAndRetrievalHealth(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.Exec(`UPDATE retrieval_candidates SET opened_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), open_count=1 WHERE run_id IN ('r1','r2')`); err != nil {
+	// The funnel reads open events. r1 was opened exactly; r2's only open was
+	// inferred from a chunk_id read; r3 was opened, but eight days ago.
+	if _, err := db.Exec(`INSERT INTO retrieval_open_events(run_id,rank,inferred) VALUES ('r1',1,0),('r2',1,1)`); err != nil {
 		t.Fatal(err)
 	}
-	// r2's only open was inferred from a chunk_id read.
-	if _, err := db.Exec(`UPDATE retrieval_candidates SET inferred_open_count=1 WHERE run_id='r2'`); err != nil {
+	if _, err := db.Exec(`INSERT INTO retrieval_open_events(run_id,rank,opened_at) VALUES ('r3',1,strftime('%Y-%m-%dT%H:%M:%fZ','now','-8 days'))`); err != nil {
 		t.Fatal(err)
 	}
 

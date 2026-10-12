@@ -118,6 +118,9 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := migrateEvidenceAnchors(db); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := applySQLMigration(db, 13, "013_retrieval_open_events.sql"); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
 }
 
