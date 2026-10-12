@@ -35,6 +35,11 @@ we dealt with this before?" and get an answer from any agent's past sessions.
 
 It is a single Go binary. Everything stays on your machine.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.png">
+  <img alt="Claude Code and Codex session logs are read by ctx's adapters, redacted, and written to one SQLite file (ctx.db) with FTS5 and sqlite-vec indexes. An optional local Ollama embeds chunks into vectors. Hybrid search fuses keyword and vector results, and the MCP server and CLI hand the context back to any agent, whose new sessions are ingested in turn." src="docs/diagrams/architecture.png">
+</picture>
+
 ```
 $ ctx search "how does the daemon embed new chunks in the background"
 [claude-code] 2026-09-20T16:11:47.479Z  claude-code:91ae043d-130e-4d25-8db5-266fe79bbbd5
