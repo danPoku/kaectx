@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,6 +36,13 @@ func TestFormatSearchShowsRunAndRanks(t *testing.T) {
 	}
 	if !strings.Contains(out, "[codex]") {
 		t.Errorf("output lost its hits:\n%s", out)
+	}
+
+	// A run ID beside a telemetry error names a run that was never stored.
+	got.RunID, got.TelemetryErr = "abc123", errors.New("commit failed")
+	out = formatSearch(got)
+	if strings.Contains(out, "abc123") || strings.Contains(out, "#1") {
+		t.Errorf("output offers labelling for an unrecorded run:\n%s", out)
 	}
 }
 

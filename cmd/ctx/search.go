@@ -93,11 +93,12 @@ func formatSearch(got search.BestResult) string {
 		return "no results\n"
 	}
 	var b strings.Builder
-	if got.RunID != "" {
+	labellable := got.RunID != "" && got.TelemetryErr == nil
+	if labellable {
 		b.WriteString(labelHint(got.RunID) + "\n\n")
 	}
 	for i, r := range got.Results {
-		if got.RunID != "" {
+		if labellable {
 			fmt.Fprintf(&b, "#%d ", i+1)
 		}
 		fmt.Fprintf(&b, "[%s] %s  %s  seq %d-%d\n    %s\n\n", r.Agent, r.At, r.SessionID, r.FirstSeq, r.LastSeq, r.Snippet)
