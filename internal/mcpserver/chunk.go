@@ -180,8 +180,17 @@ func (s *server) recordOpen(runID string, rank int, chunkID int64, inferred bool
 		return false
 	}
 	defer tx.Rollback()
+	// opened_at has millisecond resolution, so two opens inside one
+	// millisecond would share a time. Each open is therefore placed at least
+	// 1ms after the result's previous open: times stay distinct and in order,
+	// and are off by at most a millisecond per open in a burst.
 	result, err := tx.Exec(`UPDATE retrieval_candidates
-		SET opened_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), open_count=open_count+1,
+		SET opened_at=CASE
+				WHEN opened_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ','now') > opened_at
+				THEN strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				ELSE strftime('%Y-%m-%dT%H:%M:%fZ', opened_at, '+0.001 seconds')
+			END,
+			open_count=open_count+1,
 			inferred_open_count=inferred_open_count+?
 		WHERE run_id=? AND rank=? AND chunk_id=? AND EXISTS (
 			SELECT 1 FROM retrieval_runs rr WHERE rr.id=retrieval_candidates.run_id AND rr.project_id=?

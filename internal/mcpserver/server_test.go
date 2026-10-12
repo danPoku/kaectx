@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -575,11 +574,11 @@ func TestGetChunkKeepsEveryOpen(t *testing.T) {
 	}
 	callTool(t, cs, "search_context", map[string]any{"query": "WAL"}, &hit)
 	exact := map[string]any{"chunk_id": hit.Results[0].ChunkID, "run_id": hit.RunID, "rank": 1}
+	// No pauses between calls: opens landing in the same millisecond must
+	// still get distinct, ordered times.
 	var out struct{}
 	callTool(t, cs, "get_chunk", exact, &out)
-	time.Sleep(5 * time.Millisecond) // opened_at has millisecond resolution
 	callTool(t, cs, "get_chunk", exact, &out)
-	time.Sleep(5 * time.Millisecond)
 	callTool(t, cs, "get_chunk", map[string]any{"chunk_id": hit.Results[0].ChunkID}, &out) // inferred
 
 	rows, err := db.Query(`SELECT opened_at, inferred, backfilled FROM retrieval_open_events
@@ -603,8 +602,15 @@ func TestGetChunkKeepsEveryOpen(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("open events = %+v, want 3", got)
 	}
-	if got[0].at == got[1].at || got[1].at == got[2].at {
-		t.Errorf("open times = %s, %s, %s; want each open's own time", got[0].at, got[1].at, got[2].at)
+	if !(got[0].at < got[1].at && got[1].at < got[2].at) {
+		t.Errorf("open times = %s, %s, %s; want distinct and increasing", got[0].at, got[1].at, got[2].at)
+	}
+	var last string
+	if err := db.QueryRow(`SELECT opened_at FROM retrieval_candidates WHERE run_id = ? AND rank = 1`, hit.RunID).Scan(&last); err != nil {
+		t.Fatal(err)
+	}
+	if last != got[2].at {
+		t.Errorf("candidate opened_at = %s, want the last event's %s", last, got[2].at)
 	}
 	if got[0].inferred || got[1].inferred || !got[2].inferred || got[0].backfilled {
 		t.Errorf("events = %+v, want exact, exact, inferred and none backfilled", got)

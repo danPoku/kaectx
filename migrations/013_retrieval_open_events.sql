@@ -28,8 +28,11 @@ CREATE INDEX IF NOT EXISTS idx_retrieval_open_events_time
 INSERT INTO retrieval_open_events(run_id, rank, opened_at, inferred, backfilled)
 SELECT run_id, rank, opened_at,
        inferred_open_count > 0 AND inferred_open_count = open_count, 1
-  FROM retrieval_candidates
- WHERE opened_at IS NOT NULL;
+  FROM retrieval_candidates rc
+ WHERE opened_at IS NOT NULL
+   -- Repeat-safe: a result that already has its backfilled row gets no other.
+   AND NOT EXISTS (SELECT 1 FROM retrieval_open_events e
+                    WHERE e.run_id = rc.run_id AND e.rank = rc.rank AND e.backfilled = 1);
 
 INSERT OR IGNORE INTO schema_migrations(version, name)
 VALUES (13, 'retrieval_open_events');

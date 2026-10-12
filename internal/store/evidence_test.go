@@ -86,6 +86,11 @@ func TestMigrateOpenEventsBackfillsPriorOpens(t *testing.T) {
 	if err := applySQLMigration(db, 13, "013_retrieval_open_events.sql"); err != nil {
 		t.Fatal(err)
 	}
+	// The script itself must be repeat-safe, not only guarded by the version.
+	mustExec(t, db, `DELETE FROM schema_migrations WHERE version = 13`)
+	if err := applySQLMigration(db, 13, "013_retrieval_open_events.sql"); err != nil {
+		t.Fatal(err)
+	}
 	rows, err := db.Query(`SELECT rank, opened_at, inferred, backfilled FROM retrieval_open_events ORDER BY rank`)
 	if err != nil {
 		t.Fatal(err)

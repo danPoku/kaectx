@@ -315,8 +315,10 @@ the hit's `first_seq` and `last_seq`.
 Opening a search hit is recorded separately from its outcome. An open means the
 agent inspected the evidence; it does not mean the evidence was correct or
 useful. Once the agent knows whether the context influenced its answer or work,
-it calls `record_retrieval_outcome` with that search run ID and rank. Every open
-is kept as its own row (`retrieval_open_events`). `ctx doctor` reports the
+it calls `record_retrieval_outcome` with that search run ID and rank. From migration
+013 on, every open is kept as its own row (`retrieval_open_events`). Opens
+from before it are represented by one row per result, marked `backfilled`,
+even when that result had been opened several times. `ctx doctor` reports the
 seven-day funnel from opened results to explicit labels, making missing feedback
 visible instead of silently leaving risk-aware retrieval neutral.
 
