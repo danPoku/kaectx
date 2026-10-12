@@ -91,7 +91,7 @@ func (s *server) registerSearch(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "search_context",
 		Description: "Keyword search over past coding-agent sessions in this project — across every agent that's been ingested (Claude Code, Codex, ...), not just the one calling this tool. " +
-			"Returns short snippets, not full transcripts. To read a hit, make the call in its next_step: get_chunk with its chunk_id, the result's run_id and the hit's rank (the matching exchange, ~1k tokens). Or call get_session with its session_id and from_seq/to_seq set to the hit's first_seq/last_seq. " +
+			"Returns short snippets, not full transcripts. To read a hit, make the call in its next_step: get_chunk with its chunk_id, the result's run_id and the hit's rank (the matching exchange, ~1k tokens). Or call get_session with its session_id, from_seq/to_seq set to the hit's first_seq/last_seq, and the same run_id and rank. " +
 			"For questions about a period (\"what happened last week\"), set since/until: otherwise older, stronger matches outrank the period you asked about. " +
 			"If the result's index.warning is set, ctx has not read some recent logs yet; say so rather than concluding nothing happened.",
 	}, s.searchContext)

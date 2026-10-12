@@ -70,6 +70,9 @@ type getSessionArgs struct {
 	// IncludeTools defaults to false: only user/assistant text comes back.
 	IncludeTools bool `json:"include_tools,omitempty" jsonschema:"also return tool calls and tool results (large; default false = conversation text only)"`
 	MaxChars     int  `json:"max_chars,omitempty" jsonschema:"cap on total characters returned, default 20000, max 60000; check truncated/next_from_seq to continue"`
+	// RunID and Rank attribute the read to a search hit, as on get_chunk.
+	RunID string `json:"run_id,omitempty" jsonschema:"run_id returned by search_context when reading one of its hits; provide with rank to record the open"`
+	Rank  int    `json:"rank,omitempty" jsonschema:"1-based rank of the hit being read; provide with run_id"`
 }
 
 type sessionMessage struct {
@@ -92,6 +95,11 @@ type getSessionResult struct {
 	// this tool from being used to swallow a whole transcript in one call.
 	Truncated   bool `json:"truncated"`
 	NextFromSeq *int `json:"next_from_seq,omitempty"`
+	// OpenRecorded, FeedbackTarget and NextStep work as on get_chunk, for a
+	// call that passed a hit's run_id and rank.
+	OpenRecorded   bool            `json:"open_recorded"`
+	FeedbackTarget *feedbackTarget `json:"feedback_target,omitempty"`
+	NextStep       string          `json:"next_step,omitempty"`
 }
 
 type sessionsTouchingArgs struct {
@@ -121,7 +129,8 @@ func (s *server) registerSessions(srv *mcp.Server) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_session",
-		Description: "Read a session's messages in order, paged by sequence number. Returns conversation text only unless include_tools is set. Capped by total characters (max_chars) and per-message length; check `truncated` and use `next_from_seq` to continue. To read a search hit, pass its first_seq/last_seq as from_seq/to_seq rather than paging from 0.",
+		Description: "Read a session's messages in order, paged by sequence number. Returns conversation text only unless include_tools is set. Capped by total characters (max_chars) and per-message length; check `truncated` and use `next_from_seq` to continue. " +
+			"To read a search hit, pass its first_seq/last_seq as from_seq/to_seq rather than paging from 0, and the search's run_id and the hit's rank to record the open; the result's next_step is then the call that labels it.",
 	}, s.getSession)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -176,6 +185,9 @@ func (s *server) recentSessions(_ context.Context, _ *mcp.CallToolRequest, args 
 }
 
 func (s *server) getSession(_ context.Context, _ *mcp.CallToolRequest, args getSessionArgs) (*mcp.CallToolResult, getSessionResult, error) {
+	if (args.RunID != "") != (args.Rank > 0) {
+		return nil, getSessionResult{}, fmt.Errorf("pass run_id and rank together, or neither")
+	}
 	fromSeq := args.FromSeq
 	toSeq := args.ToSeq
 	// explicitRange: the caller named a range that fits under the row cap.
@@ -203,7 +215,8 @@ func (s *server) getSession(_ context.Context, _ *mcp.CallToolRequest, args getS
 		return nil, getSessionResult{}, err
 	}
 	rows, err := s.db.Query(sqlText,
-		sql.Named("session_id", args.SessionID), sql.Named("from_seq", fromSeq), sql.Named("to_seq", toSeq),
+		sql.Named("session_id", args.SessionID), sql.Named("project_id", s.projectID),
+		sql.Named("from_seq", fromSeq), sql.Named("to_seq", toSeq),
 		sql.Named("include_tools", includeTools))
 	if err != nil {
 		return nil, getSessionResult{}, err
@@ -250,7 +263,7 @@ func (s *server) getSession(_ context.Context, _ *mcp.CallToolRequest, args getS
 		if err != nil {
 			return nil, getSessionResult{}, err
 		}
-		if err := s.db.QueryRow(q, sql.Named("session_id", args.SessionID),
+		if err := s.db.QueryRow(q, sql.Named("session_id", args.SessionID), sql.Named("project_id", s.projectID),
 			sql.Named("after_seq", toSeq), sql.Named("include_tools", includeTools)).Scan(&next); err != nil {
 			return nil, getSessionResult{}, err
 		}
@@ -262,6 +275,18 @@ func (s *server) getSession(_ context.Context, _ *mcp.CallToolRequest, args getS
 	if resumeAt != nil {
 		out.Truncated = true
 		out.NextFromSeq = resumeAt
+	}
+	// The open is judged against the messages actually returned, not the
+	// requested range: a page cut short by max_chars, or a range that misses
+	// the hit, is not a read of it. Nothing returned, no open.
+	if args.RunID != "" && len(out.Messages) > 0 {
+		first, last := out.Messages[0].Seq, out.Messages[len(out.Messages)-1].Seq
+		if s.recordOpen(args.RunID, args.Rank, false,
+			`session_id=? AND first_seq<=? AND last_seq>=?`, args.SessionID, last, first) {
+			out.FeedbackTarget = &feedbackTarget{RunID: args.RunID, Rank: args.Rank}
+			out.OpenRecorded = true
+			out.NextStep = labelStep(*out.FeedbackTarget)
+		}
 	}
 	return nil, out, nil
 }

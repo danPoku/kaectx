@@ -902,6 +902,113 @@ func TestGetChunk(t *testing.T) {
 	})
 }
 
+// TestGetSessionRecordsOpens is the regression test for issue #15: reading a
+// hit through get_session left no open, so it could never be labelled.
+func TestGetSessionRecordsOpens(t *testing.T) {
+	cs, db := testServer(t)
+	var hit struct {
+		RunID   string `json:"run_id"`
+		Results []struct {
+			SessionID string `json:"session_id"`
+			FirstSeq  int    `json:"first_seq"`
+			LastSeq   int    `json:"last_seq"`
+		} `json:"results"`
+	}
+	callTool(t, cs, "search_context", map[string]any{"query": "WAL"}, &hit)
+	h := hit.Results[0]
+	type result struct {
+		Messages       []json.RawMessage `json:"messages"`
+		OpenRecorded   bool              `json:"open_recorded"`
+		NextStep       string            `json:"next_step"`
+		FeedbackTarget *struct {
+			RunID string `json:"run_id"`
+			Rank  int    `json:"rank"`
+		} `json:"feedback_target"`
+	}
+	opens := func() int {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM retrieval_open_events WHERE run_id = ? AND rank = 1`, hit.RunID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	t.Run("hit range with run_id and rank records an exact open", func(t *testing.T) {
+		var got result
+		callTool(t, cs, "get_session", map[string]any{
+			"session_id": h.SessionID, "from_seq": h.FirstSeq, "to_seq": h.LastSeq,
+			"run_id": hit.RunID, "rank": 1,
+		}, &got)
+		if len(got.Messages) == 0 || !got.OpenRecorded || got.FeedbackTarget == nil || got.FeedbackTarget.RunID != hit.RunID {
+			t.Fatalf("result = %+v, want messages and an open on the search's rank 1", got)
+		}
+		if !strings.Contains(got.NextStep, "record_retrieval_outcome(run_id=\""+hit.RunID+"\", rank=1,") {
+			t.Errorf("NextStep = %q, want the labelling call", got.NextStep)
+		}
+		if opens() != 1 {
+			t.Errorf("open events = %d, want 1", opens())
+		}
+	})
+
+	t.Run("a range that misses the hit records nothing", func(t *testing.T) {
+		before := opens()
+		var got result
+		callTool(t, cs, "get_session", map[string]any{
+			"session_id": h.SessionID, "from_seq": h.LastSeq + 1, "to_seq": h.LastSeq + 50,
+			"run_id": hit.RunID, "rank": 1,
+		}, &got)
+		if got.OpenRecorded || opens() != before {
+			t.Errorf("open recorded for messages after the hit: %+v", got)
+		}
+	})
+
+	t.Run("without run_id and rank nothing is recorded", func(t *testing.T) {
+		before := opens()
+		var got result
+		callTool(t, cs, "get_session", map[string]any{"session_id": h.SessionID, "from_seq": h.FirstSeq, "to_seq": h.LastSeq}, &got)
+		if len(got.Messages) == 0 || got.OpenRecorded || got.NextStep != "" || opens() != before {
+			t.Errorf("plain read = %+v, want messages and no open", got)
+		}
+	})
+
+	t.Run("half an exact target is an error", func(t *testing.T) {
+		for _, extra := range []map[string]any{{"run_id": hit.RunID}, {"rank": 1}} {
+			args := map[string]any{"session_id": h.SessionID}
+			for k, v := range extra {
+				args[k] = v
+			}
+			res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "get_session", Arguments: args})
+			if err == nil && !res.IsError {
+				t.Errorf("get_session(%v) succeeded, want an error", args)
+			}
+		}
+	})
+}
+
+// TestGetSessionIsProjectScoped: get_chunk reads a chunk from another project
+// as absent, and get_session must do the same for a whole transcript.
+func TestGetSessionIsProjectScoped(t *testing.T) {
+	cs, db := testServer(t)
+	other, err := store.ResolveProject(db, "/home/other/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO sessions(id, agent, native_id, project_id, started_at) VALUES ('codex:elsewhere', 'codex', 'elsewhere', ?, '2026-09-20T10:00:00Z');
+		INSERT INTO messages(session_id, seq, role, kind, content) VALUES ('codex:elsewhere', 0, 'user', 'text', 'secret from another project'),
+			('codex:elsewhere', 1, 'assistant', 'text', 'reply');`, other); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Messages    []json.RawMessage `json:"messages"`
+		NextFromSeq *int              `json:"next_from_seq"`
+	}
+	callTool(t, cs, "get_session", map[string]any{"session_id": "codex:elsewhere"}, &got)
+	if len(got.Messages) != 0 || got.NextFromSeq != nil {
+		t.Errorf("another project's session returned %d messages (next %v), want none", len(got.Messages), got.NextFromSeq)
+	}
+}
+
 func TestGetSessionDefaultsToConversationText(t *testing.T) {
 	cs, _ := testServer(t)
 
