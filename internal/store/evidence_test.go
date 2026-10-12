@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 )
 
@@ -62,6 +63,46 @@ func TestBackfillEvidenceAnchors(t *testing.T) {
 		if anchor != c.want || (c.want.Valid && session.String != "s") {
 			t.Errorf("%s: anchor %v session %v, want %v in s", c.name, anchor, session, c.want)
 		}
+	}
+}
+
+// TestMigrateOpenEventsBackfillsPriorOpens upgrades a database that recorded
+// opens only as counters: each opened result gets one backfilled event at its
+// last open, flagged inferred only when every open was.
+func TestMigrateOpenEventsBackfillsPriorOpens(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	// Roll the database back to just before 013.
+	mustExec(t, db, `DROP TABLE retrieval_open_events; DELETE FROM schema_migrations WHERE version = 13;
+		INSERT INTO projects(id, name) VALUES (1, 'p');
+		INSERT INTO retrieval_runs(id, project_id, surface, query, requested_limit, mode, duration_ms, result_count)
+			VALUES ('r', 1, 'mcp', 'q', 10, 'keyword', 0, 3);
+		INSERT INTO retrieval_candidates(run_id, rank, evidence_key, session_id, first_seq, last_seq, score, score_kind, opened_at, open_count, inferred_open_count)
+			VALUES ('r', 1, 'a', 's', 0, 1, 0, 'bm25', '2026-10-01T10:00:00.000Z', 2, 0),
+			       ('r', 2, 'b', 's', 2, 3, 0, 'bm25', '2026-10-01T11:00:00.000Z', 1, 1),
+			       ('r', 3, 'c', 's', 4, 5, 0, 'bm25', NULL, 0, 0);`)
+	if err := applySQLMigration(db, 13, "013_retrieval_open_events.sql"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(`SELECT rank, opened_at, inferred, backfilled FROM retrieval_open_events ORDER BY rank`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var rank, inferred, backfilled int
+		var at string
+		if err := rows.Scan(&rank, &at, &inferred, &backfilled); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%d %s %d %d", rank, at, inferred, backfilled))
+	}
+	want := []string{"1 2026-10-01T10:00:00.000Z 0 1", "2 2026-10-01T11:00:00.000Z 1 1"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("backfilled events = %q, want %q", got, want)
 	}
 }
 

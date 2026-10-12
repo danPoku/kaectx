@@ -83,18 +83,22 @@ func Collect(ctx context.Context, db *sql.DB, projectID int64) (Report, error) {
 		Scan(&r.RecentRetrievals, &r.RecentZeroResultRuns, &r.RecentHybridRuns, &r.RecentPolicyRuns); err != nil {
 		return r, fmt.Errorf("read retrieval health: %w", err)
 	}
-	// A result opened both ways counts as exact: the exact open alone is
-	// enough to attribute it, so the inferred one adds no doubt.
-	if err := db.QueryRowContext(ctx, `SELECT
-		COUNT(*),
-		COALESCE(SUM(CASE WHEN rc.inferred_open_count>0 AND rc.inferred_open_count=rc.open_count THEN 1 ELSE 0 END),0),
+	// The funnel reads open events, so a result counts if any open landed in
+	// the window, not only its last one. A result opened both ways in the
+	// window counts as exact: the exact open alone is enough to attribute it.
+	if err := db.QueryRowContext(ctx, `WITH opened AS (
+		SELECT e.run_id, e.rank, MIN(e.inferred) AS inferred_only
+		FROM retrieval_open_events e JOIN retrieval_runs rr ON rr.id=e.run_id
+		WHERE rr.project_id=? AND e.opened_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')
+		GROUP BY e.run_id, e.rank
+	)
+	SELECT COUNT(*),
+		COALESCE(SUM(inferred_only),0),
 		COALESCE(SUM(CASE WHEN EXISTS (
 			SELECT 1 FROM memory_observations mo
-			WHERE mo.run_id=rc.run_id AND mo.candidate_rank=rc.rank
+			WHERE mo.run_id=o.run_id AND mo.candidate_rank=o.rank
 		) THEN 1 ELSE 0 END),0)
-		FROM retrieval_candidates rc JOIN retrieval_runs rr ON rr.id=rc.run_id
-		WHERE rr.project_id=? AND rc.opened_at IS NOT NULL
-		AND rc.opened_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')`, projectID).
+		FROM opened o`, projectID).
 		Scan(&r.RecentOpenedResults, &r.RecentInferredOpens, &r.RecentLabelledOpens); err != nil {
 		return r, fmt.Errorf("read retrieval feedback funnel: %w", err)
 	}
