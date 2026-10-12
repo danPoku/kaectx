@@ -40,7 +40,17 @@ type checkpointResult struct {
 	Reasons        []string          `json:"reasons"`
 	Metrics        checkpointMetrics `json:"metrics"`
 	Index          *indexStatus      `json:"index,omitempty"`
+	// PendingFeedback lists opened results still waiting for an outcome. A
+	// checkpoint is when an agent is most likely to know whether they helped,
+	// and the one moment it reliably checks in. Retrieval nudges only: the
+	// checkpoint decision this call may have just recorded is the user's to
+	// make, not something to ask back immediately.
+	PendingFeedback []feedbackNudge `json:"pending_feedback"`
 }
+
+// checkpointPendingLimit caps pending_feedback so a long-neglected backlog
+// cannot crowd out the checkpoint advice itself.
+const checkpointPendingLimit = 10
 
 type checkpointSession struct {
 	id           string
@@ -53,7 +63,7 @@ type checkpointSession struct {
 func (s *server) registerCheckpoint(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "checkpoint_status",
-		Description: "Assess whether the current coding session is large enough to merit a handoff. Call at natural milestones and when work becomes long, repetitive, or spans many files. If should_signal is true, explain the reasons to the user and offer to save a checkpoint and continue in a fresh session. This is advisory: never end the session automatically.",
+		Description: "Assess whether the current coding session is large enough to merit a handoff. Call at natural milestones and when work becomes long, repetitive, or spans many files. If should_signal is true, explain the reasons to the user and offer to save a checkpoint and continue in a fresh session. This is advisory: never end the session automatically. pending_feedback lists opened results still waiting for an outcome; label the ones whose usefulness you now know with record_retrieval_outcome.",
 	}, s.checkpointStatus)
 }
 
@@ -139,6 +149,9 @@ func (s *server) checkpointStatus(_ context.Context, _ *mcp.CallToolRequest, arg
 			out.Metrics.FilesChanged, string(reasons)); err != nil {
 			return nil, checkpointResult{}, fmt.Errorf("record checkpoint recommendation: %w", err)
 		}
+	}
+	if out.PendingFeedback, err = s.pendingRetrievalNudges(checkpointPendingLimit); err != nil {
+		return nil, checkpointResult{}, fmt.Errorf("list pending feedback: %w", err)
 	}
 	return nil, out, nil
 }
