@@ -54,9 +54,18 @@ func TestRunCatchesWritesRightAfterStartupScan(t *testing.T) {
 	t.Cleanup(func() { afterInitialScan = func() {} })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	sources := []Source{{Agent: "claude-code", Root: root, NewAdapter: func() ingest.Adapter { return claudecode.New() }}}
-	go Run(ctx, db, sources, time.Hour, 20*time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		Run(ctx, db, sources, time.Hour, 20*time.Millisecond)
+	}()
+	// Join Run before the cleanups close the database and reset the hook,
+	// so the daemon never outlives the test.
+	defer func() {
+		cancel()
+		<-done
+	}()
 	<-appended
 
 	deadline := time.Now().Add(3 * time.Second)
