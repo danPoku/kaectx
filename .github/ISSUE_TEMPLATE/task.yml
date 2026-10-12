@@ -1,0 +1,36 @@
+name: Task
+description: Internal work with no direct user-facing outcome. Refactor, tooling, CI, docs, cleanup.
+title: "[TASK] "
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: One short paragraph describing the end state.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Why this is worth doing. The failure it prevents or the time it saves. Optional for small chores.
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      value: |
+        -
+        - Out of scope:
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ]
+    validations:
+      required: true

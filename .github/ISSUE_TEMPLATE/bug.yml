@@ -1,0 +1,63 @@
+name: Bug
+description: ctx ingests, stores, searches or serves something wrongly, or crashes.
+title: "[BUG] "
+labels: [bug]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: One short paragraph describing the end state once this is fixed.
+      placeholder: Codex sessions started from a subdirectory land in the same project as ones started at the repo root.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: >-
+        What proves this is real: the command you ran and its output, a `ctx doctor`
+        excerpt, or a code reference such as internal/ingest/codex/adapter.go:42.
+        Redact secrets and private paths before pasting session log lines.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: ctx version
+      description: Output of `go version -m "$(command -v ctx)"`, the mod line is enough. Or the commit if built from a clone.
+      placeholder: github.com/danPoku/kaectx v0.2.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux
+        - WSL2
+        - Native Windows
+        - macOS
+    validations:
+      required: true
+
+  - type: input
+    id: agents
+    attributes:
+      label: Agent versions involved
+      description: Log formats are undocumented and change between versions.
+      placeholder: Claude Code 2.1.278, codex-cli 0.153.0
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ]
+        - [ ] Covered by a test (a fixture in testdata/ for adapter bugs)
+    validations:
+      required: true

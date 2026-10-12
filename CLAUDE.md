@@ -31,6 +31,17 @@ their own way; head office collects, standardises, indexes, and answers queries.
 - SQLite driver: start with `mattn/go-sqlite3` (`-tags sqlite_fts5`) + sqlite-vec cgo
   bindings. Evaluate `ncruces/go-sqlite3` only if cgo becomes a real problem.
 
+## Branch workflow
+Full rules in `CONTRIBUTING.md`. The parts an agent must never get wrong:
+- `master` changes only by merging a PR on GitHub. Never commit to `master`
+  locally and push it, whoever asks; `.githooks/pre-push` refuses it
+  (`git config core.hooksPath .githooks` once per clone; never `--no-verify`).
+- Cut every branch from an up-to-date `master`, named `<prefix>/<issue>-<slug>`
+  with prefix `feature/`, `fix/`, `hotfix/`, `chore/`, `docs/`, or `release/vX.Y.Z`.
+- PRs merge with a merge commit, never squash. Delete the branch after merge.
+- Releases are `v*` tags on `master`, pushed only after the `release/` PR merges.
+  A pushed tag is never moved or deleted.
+
 ## Schema
 Already written and tested — see `migrations/001_core.sql`, `migrations/002_vectors.sql`,
 `queries/retrieval.sql`. Tables: projects, project_paths, sources, sessions, messages,

@@ -1,0 +1,56 @@
+name: Feature
+description: A new command, MCP tool, adapter, or retrieval behaviour.
+title: "[FEATURE] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: One short paragraph. What can an agent or a person do after this ships that they cannot do now?
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Why now. A session where ctx fell short, a limitation people keep hitting, a planning decision.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: The work, and the boundaries. The "out of scope" line is what stops this growing mid-PR.
+      value: |
+        -
+        - Out of scope:
+    validations:
+      required: true
+
+  - type: textarea
+    id: surface
+    attributes:
+      label: Interface changes
+      description: >-
+        What connected agents and scripts will see. Any rename or removal here makes the
+        next release a minor bump, so name it now rather than in review.
+      value: |
+        - CLI commands / flags:
+        - MCP tools / arguments / output fields:
+        - Schema migration (and does an existing database need `ctx repair`?):
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ]
+        - [ ] Covered by a test
+        - [ ] README updated
+    validations:
+      required: true

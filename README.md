@@ -428,6 +428,10 @@ way.
 
 ## Development
 
+Branches, pull requests and releases are covered in
+[CONTRIBUTING.md](CONTRIBUTING.md). After cloning, enable the push guard once:
+`git config core.hooksPath .githooks`.
+
 Linux is the primary development environment:
 
 ```
