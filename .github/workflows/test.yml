@@ -1,6 +1,12 @@
 name: test
 
-on: [push, pull_request]
+# PRs are tested on the pull_request event; pushes only on master (each merge)
+# and release tags. Testing every branch push as well would run each PR twice.
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
 
 permissions:
   contents: read

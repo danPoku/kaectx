@@ -1,0 +1,66 @@
+#!/bin/sh
+# Refuses pushes that break the branch rules in CONTRIBUTING.md.
+#
+#   master     changes only by merging a pull request on GitHub. A PR merge happens
+#              on GitHub and never runs this hook, so refusing every local push to
+#              master blocks nothing legitimate.
+#   v* tags    are releases. `go install ...@latest` resolves the newest tag, so a
+#              tag is the thing users actually get. A release tag must point at a
+#              commit already on origin/master, and is never moved or deleted once
+#              pushed: the Go module proxy caches a version forever, so a retag
+#              would give two users two different "v0.2.0"s.
+#   branches   are named <prefix>/<slug>, prefix one of the list below, so the
+#              branch list reads as a list of intentions and greps by kind.
+#
+# Think of master as the shop's display window: work is done in the back room
+# (a branch), checked (CI on the PR), and only then put in the window (merged).
+# A tag is the price label: once a customer has seen it, you don't change it.
+#
+# Enable once per clone (worktrees share it):   git config core.hooksPath .githooks
+
+remote="$1"
+zero=0000000000000000000000000000000000000000
+status=0
+
+refuse() {
+    echo "pre-push: refusing to push $1: $2" >&2
+    status=1
+}
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$remote_ref" in
+        refs/heads/master)
+            refuse master "master changes only by merging a pull request. Push your branch and open a PR into master."
+            ;;
+        refs/tags/v*)
+            tag=${remote_ref#refs/tags/}
+            if [ "$local_sha" = "$zero" ]; then
+                refuse "$tag" "release tags are never deleted; the Go module proxy has already cached it."
+                continue
+            fi
+            if [ "$remote_sha" != "$zero" ]; then
+                refuse "$tag" "release tags are never moved. Cut the next version instead."
+                continue
+            fi
+            # An annotated tag's sha is the tag object; peel it to the commit.
+            commit=$(git rev-parse --verify --quiet "$local_sha^{commit}")
+            if [ -z "$commit" ] || ! git merge-base --is-ancestor "$commit" "refs/remotes/$remote/master" 2>/dev/null; then
+                refuse "$tag" "it does not point at a commit on $remote/master. Merge the release PR, fetch, then tag origin/master."
+            fi
+            ;;
+        refs/heads/*)
+            branch=${remote_ref#refs/heads/}
+            case "$branch" in
+                feature/?* | fix/?* | hotfix/?* | chore/?* | docs/?* | release/v?*) ;;
+                *)
+                    # Only new branches are checked, so existing ones keep pushing.
+                    if [ "$remote_sha" = "$zero" ] && [ "$local_sha" != "$zero" ]; then
+                        refuse "$branch" "name it feature/, fix/, hotfix/, chore/, docs/ or release/vX.Y.Z followed by <issue>-<slug>."
+                    fi
+                    ;;
+            esac
+            ;;
+    esac
+done
+
+exit $status
