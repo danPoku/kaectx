@@ -1,0 +1,13 @@
+-- Migration 011: separate inferred opens from exact ones.
+--
+-- get_chunk records an exact open when the caller passes the run_id and rank
+-- from search_context. Agents usually pass only chunk_id, so get_chunk now
+-- attributes that read to the latest search in the project that returned the
+-- chunk. That guess can be wrong when two agents search at once, so
+-- inferred_open_count keeps those opens apart: open_count still counts every
+-- open, and open_count - inferred_open_count is the exact ones. Rows written
+-- before this migration default to 0, which reads as exact, and that is true:
+-- nothing inferred an open before it.
+--
+-- SQLite has no ADD COLUMN IF NOT EXISTS, so store.migrateInferredOpens
+-- applies the column idempotently and records schema migration 011.

@@ -21,10 +21,10 @@ func TestFormatDoctor(t *testing.T) {
 		Sessions:       4, Messages: 20, Chunks: 8, PendingEmbeddings: 3,
 		UnassignedChunks: 1, RecentRetrievals: 10, RecentZeroResultRuns: 2,
 		RecentHybridRuns: 6, RecentPolicyRuns: 1, Outcomes: 3,
-		RecentOpenedResults: 5, RecentLabelledOpens: 3,
+		RecentOpenedResults: 5, RecentInferredOpens: 2, RecentLabelledOpens: 3,
 		RetrievedEvidence: 4, ObservedEvidence: 2, CredibleEvidence: 1,
 	})
-	for _, want := range []string{"ctx doctor: ctx", "2 (1 with errors)", "4 / 20 / 8", "pending: 3", "10 (2 zero-result, 6 hybrid, 1 risk-aware)", "5 (3 labelled, 2 awaiting outcome)", "2 / 4 evidence keys (50.0%)", "1 / 1"} {
+	for _, want := range []string{"ctx doctor: ctx", "2 (1 with errors)", "4 / 20 / 8", "pending: 3", "10 (2 zero-result, 6 hybrid, 1 risk-aware)", "5 (3 exact, 2 inferred; 3 labelled, 2 awaiting outcome)", "2 / 4 evidence keys (50.0%)", "1 / 1"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}

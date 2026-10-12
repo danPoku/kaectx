@@ -15,7 +15,7 @@ import (
 )
 
 type recordOutcomeArgs struct {
-	RunID   string `json:"run_id" jsonschema:"retrieval_run_id returned by search_context or get_chunk"`
+	RunID   string `json:"run_id" jsonschema:"run_id returned by search_context or get_chunk"`
 	Rank    int    `json:"rank" jsonschema:"1-based result rank returned by search_context or get_chunk"`
 	Outcome string `json:"outcome" jsonschema:"one of helpful, unhelpful, stale, incorrect, superseded"`
 	Note    string `json:"note,omitempty" jsonschema:"optional explanation; secrets are redacted before storage"`
@@ -157,7 +157,10 @@ func (s *server) feedbackStatus(_ context.Context, _ *mcp.CallToolRequest, args 
 	}
 	remaining := limit - len(out.Nudges)
 	if remaining > 0 {
-		rows, err = s.db.Query(`SELECT rc.run_id, rc.rank, rr.query
+		// A result opened only by inferred reads may be credited to the wrong
+		// search, so its nudge says so instead of claiming high confidence.
+		rows, err = s.db.Query(`SELECT rc.run_id, rc.rank, rr.query,
+				rc.inferred_open_count>0 AND rc.inferred_open_count=rc.open_count
 			FROM retrieval_candidates rc JOIN retrieval_runs rr ON rr.id=rc.run_id
 			WHERE rr.project_id=? AND rc.opened_at IS NOT NULL
 			AND NOT EXISTS (SELECT 1 FROM memory_observations mo
@@ -170,14 +173,20 @@ func (s *server) feedbackStatus(_ context.Context, _ *mcp.CallToolRequest, args 
 		for rows.Next() {
 			var runID, query string
 			var rank int
-			if err := rows.Scan(&runID, &rank, &query); err != nil {
+			var inferredOnly bool
+			if err := rows.Scan(&runID, &rank, &query, &inferredOnly); err != nil {
 				return nil, out, err
 			}
-			out.Nudges = append(out.Nudges, feedbackNudge{
+			nudge := feedbackNudge{
 				Kind: "retrieval_outcome_missing", Source: "opened_result", Confidence: "high",
 				Prompt: "If this retrieved evidence influenced the work, record its honest outcome; opening it alone is not a helpful label.",
 				RunID:  runID, Rank: rank, Query: query,
-			})
+			}
+			if inferredOnly {
+				nudge.Source, nudge.Confidence = "inferred_open", "medium"
+				nudge.Prompt = "This open was matched to a search from the chunk alone. If you ran this query and the evidence influenced the work, record its honest outcome; otherwise skip it."
+			}
+			out.Nudges = append(out.Nudges, nudge)
 		}
 		if err := rows.Err(); err != nil {
 			return nil, out, err

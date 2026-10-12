@@ -58,7 +58,7 @@ embeddings
 
 retrieval (last 7 days)
   runs: %d (%d zero-result, %d hybrid, %d risk-aware)
-  opened: %d (%d labelled, %d awaiting outcome)
+  opened: %d (%d exact, %d inferred; %d labelled, %d awaiting outcome)
 
 outcomes (retained evidence)
   observations: %d
@@ -67,7 +67,8 @@ outcomes (retained evidence)
 `, r.ProjectName, r.Sources, r.SourcesWithErrors, lastIngest,
 		r.Sessions, r.Messages, r.Chunks, r.PendingEmbeddings, r.UnassignedChunks,
 		r.RecentRetrievals, r.RecentZeroResultRuns, r.RecentHybridRuns, r.RecentPolicyRuns,
-		r.RecentOpenedResults, r.RecentLabelledOpens, r.RecentOpenedResults-r.RecentLabelledOpens,
+		r.RecentOpenedResults, r.RecentOpenedResults-r.RecentInferredOpens, r.RecentInferredOpens,
+		r.RecentLabelledOpens, r.RecentOpenedResults-r.RecentLabelledOpens,
 		r.Outcomes, r.ObservedEvidence, r.RetrievedEvidence, r.OutcomeCoverage(),
 		r.CredibleEvidence, r.NeutralObservedEvidence())
 }

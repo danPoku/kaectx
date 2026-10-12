@@ -5,6 +5,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -39,12 +40,21 @@ type searchContextHit struct {
 	PolicyScore       float64 `json:"policy_score,omitempty"`
 	GovernanceNeutral bool    `json:"governance_neutral,omitempty"`
 	OriginalRank      int     `json:"original_rank,omitempty"`
+	// NextStep is the exact get_chunk call for this hit, run_id and rank
+	// included. Agents copy a call from a result far more reliably than they
+	// assemble one from a tool description, and without run_id and rank the
+	// open could only be inferred.
+	NextStep string `json:"next_step"`
 }
 
 type searchContextResult struct {
 	Results []searchContextHit `json:"results"`
-	// RetrievalRunID can be passed to future feedback/outcome tools without
-	// exposing database rowids or relying on unstable chunk ids.
+	// RunID is passed to get_chunk and record_retrieval_outcome, which name
+	// it run_id too. It identifies the search without exposing database
+	// rowids or relying on unstable chunk ids.
+	RunID string `json:"run_id,omitempty"`
+	// RetrievalRunID is the old name for RunID, kept for one release so
+	// clients that read it keep working. Deprecated: use run_id.
 	RetrievalRunID    string `json:"retrieval_run_id,omitempty"`
 	TelemetryRecorded bool   `json:"telemetry_recorded"`
 	// UsedSemanticSearch tells the caller whether this ran keyword+semantic
@@ -81,7 +91,7 @@ func (s *server) registerSearch(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "search_context",
 		Description: "Keyword search over past coding-agent sessions in this project — across every agent that's been ingested (Claude Code, Codex, ...), not just the one calling this tool. " +
-			"Returns short snippets, not full transcripts. To read a hit, call get_chunk with its chunk_id (the matching exchange, ~1k tokens), or get_session with its session_id and from_seq/to_seq set to the hit's first_seq/last_seq. " +
+			"Returns short snippets, not full transcripts. To read a hit, make the call in its next_step: get_chunk with its chunk_id, the result's run_id and the hit's rank (the matching exchange, ~1k tokens). Or call get_session with its session_id and from_seq/to_seq set to the hit's first_seq/last_seq. " +
 			"For questions about a period (\"what happened last week\"), set since/until: otherwise older, stronger matches outrank the period you asked about. " +
 			"If the result's index.warning is set, ctx has not read some recent logs yet; say so rather than concluding nothing happened.",
 	}, s.searchContext)
@@ -105,7 +115,7 @@ func (s *server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, args
 	if err != nil {
 		return nil, searchContextResult{}, err
 	}
-	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil, GovernanceApplied: got.GovernanceApplied, Index: s.indexStatus()}
+	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RunID: got.RunID, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil, GovernanceApplied: got.GovernanceApplied, Index: s.indexStatus()}
 	for i, r := range got.Results {
 		out.Results[i] = searchContextHit{
 			Rank: i + 1, ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent,
@@ -113,9 +123,20 @@ func (s *server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, args
 			FirstSeq: r.FirstSeq, LastSeq: r.LastSeq,
 			Reliability: r.Reliability, PolicyScore: r.PolicyScore, GovernanceNeutral: r.GovernanceNeutral,
 			OriginalRank: r.OriginalRank,
+			NextStep:     getChunkCall(r.ChunkID, got.RunID, i+1),
 		}
 	}
 	return nil, out, nil
+}
+
+// getChunkCall writes the get_chunk call that opens one hit. With no run ID
+// (telemetry failed to record the search) there is nothing to attribute the
+// open to, so the call is the plain read.
+func getChunkCall(chunkID int64, runID string, rank int) string {
+	if runID == "" {
+		return fmt.Sprintf("get_chunk(chunk_id=%d)", chunkID)
+	}
+	return fmt.Sprintf("get_chunk(chunk_id=%d, run_id=%q, rank=%d)", chunkID, runID, rank)
 }
 
 func (s *server) searchNotes(_ context.Context, _ *mcp.CallToolRequest, args searchNotesArgs) (*mcp.CallToolResult, searchNotesResult, error) {

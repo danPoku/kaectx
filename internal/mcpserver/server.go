@@ -71,7 +71,7 @@ func NewWithOptions(db *sql.DB, cwd string, embedClient embed.Embedder, opts Opt
 	}
 
 	srv := mcp.NewServer(&mcp.Implementation{Name: "ctx", Version: "0.2.0+dev"}, &mcp.ServerOptions{
-		Instructions: "Use ctx to recover prior work without loading whole transcripts. Use search_context then get_chunk for the smallest useful context, passing the retrieval_run_id and hit rank so the exact open is recorded. When retrieved context influences an answer or action, call record_retrieval_outcome with that run ID and rank and an honest outcome; an open alone is never a helpful label. At natural milestones call feedback_status and checkpoint_status. If checkpoint_status recommends a checkpoint, tell the user and offer to save a handoff before continuing in a fresh session; never end or replace the session without the user's choice, and record that choice with record_checkpoint_outcome.",
+		Instructions: "Use ctx to recover prior work without loading whole transcripts. Use search_context then get_chunk for the smallest useful context: each hit's next_step is the exact get_chunk call, with the run_id and rank that record the exact open. When retrieved context influences an answer or action, call record_retrieval_outcome with that run ID and rank and an honest outcome; an open alone is never a helpful label. At natural milestones call feedback_status and checkpoint_status. If checkpoint_status recommends a checkpoint, tell the user and offer to save a handoff before continuing in a fresh session; never end or replace the session without the user's choice, and record that choice with record_checkpoint_outcome.",
 	})
 	s.registerSearch(srv)
 	s.registerChunk(srv)

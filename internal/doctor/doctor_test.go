@@ -67,7 +67,11 @@ func TestCollectReportsCorpusAndRetrievalHealth(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.Exec(`UPDATE retrieval_candidates SET opened_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE run_id IN ('r1','r2')`); err != nil {
+	if _, err := db.Exec(`UPDATE retrieval_candidates SET opened_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), open_count=1 WHERE run_id IN ('r1','r2')`); err != nil {
+		t.Fatal(err)
+	}
+	// r2's only open was inferred from a chunk_id read.
+	if _, err := db.Exec(`UPDATE retrieval_candidates SET inferred_open_count=1 WHERE run_id='r2'`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -87,7 +91,7 @@ func TestCollectReportsCorpusAndRetrievalHealth(t *testing.T) {
 	if r.Outcomes != 3 || r.RetrievedEvidence != 1 || r.ObservedEvidence != 1 || r.CredibleEvidence != 1 || r.OutcomeCoverage() != 100 {
 		t.Errorf("outcome report = %+v", r)
 	}
-	if r.RecentOpenedResults != 2 || r.RecentLabelledOpens != 2 {
+	if r.RecentOpenedResults != 2 || r.RecentInferredOpens != 1 || r.RecentLabelledOpens != 2 {
 		t.Errorf("feedback funnel = %+v", r)
 	}
 }

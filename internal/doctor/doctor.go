@@ -27,6 +27,7 @@ type Report struct {
 	RecentHybridRuns     int
 	RecentPolicyRuns     int
 	RecentOpenedResults  int
+	RecentInferredOpens  int // opened only by a chunk_id read that get_chunk attributed to a search
 	RecentLabelledOpens  int
 	Outcomes             int
 	RetrievedEvidence    int
@@ -82,8 +83,11 @@ func Collect(ctx context.Context, db *sql.DB, projectID int64) (Report, error) {
 		Scan(&r.RecentRetrievals, &r.RecentZeroResultRuns, &r.RecentHybridRuns, &r.RecentPolicyRuns); err != nil {
 		return r, fmt.Errorf("read retrieval health: %w", err)
 	}
+	// A result opened both ways counts as exact: the exact open alone is
+	// enough to attribute it, so the inferred one adds no doubt.
 	if err := db.QueryRowContext(ctx, `SELECT
 		COUNT(*),
+		COALESCE(SUM(CASE WHEN rc.inferred_open_count>0 AND rc.inferred_open_count=rc.open_count THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN EXISTS (
 			SELECT 1 FROM memory_observations mo
 			WHERE mo.run_id=rc.run_id AND mo.candidate_rank=rc.rank
@@ -91,7 +95,7 @@ func Collect(ctx context.Context, db *sql.DB, projectID int64) (Report, error) {
 		FROM retrieval_candidates rc JOIN retrieval_runs rr ON rr.id=rc.run_id
 		WHERE rr.project_id=? AND rc.opened_at IS NOT NULL
 		AND rc.opened_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')`, projectID).
-		Scan(&r.RecentOpenedResults, &r.RecentLabelledOpens); err != nil {
+		Scan(&r.RecentOpenedResults, &r.RecentInferredOpens, &r.RecentLabelledOpens); err != nil {
 		return r, fmt.Errorf("read retrieval feedback funnel: %w", err)
 	}
 	if err := db.QueryRowContext(ctx, `WITH retrieved AS (

@@ -112,6 +112,9 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := applySQLMigration(db, 10, "010_feedback_observer.sql"); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := migrateInferredOpens(db); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
 }
 
@@ -199,6 +202,20 @@ func migrateRetrievalOpens(db *sql.DB) error {
 		column{"open_count", "INTEGER NOT NULL DEFAULT 0"})
 }
 
+// migrateInferredOpens is migration 011: inferred_open_count counts the opens
+// get_chunk attributed to a search from chunk_id alone. Like a claim filed
+// without a policy number and matched to the most likely policy, it is still
+// evidence, but analysis must be able to set it aside.
+func migrateInferredOpens(db *sql.DB) error {
+	// Inference looks candidates up by chunk_id, which no index covered. The
+	// index goes in the migration's own transaction so version 11 is never
+	// recorded without it.
+	return addColumnsWith(db, 11, "inferred_opens", "retrieval_candidates",
+		[]string{`CREATE INDEX IF NOT EXISTS idx_retrieval_candidates_chunk
+			ON retrieval_candidates(chunk_id)`},
+		column{"inferred_open_count", "INTEGER NOT NULL DEFAULT 0"})
+}
+
 // addColumns is the shared shape of the ALTER-based migrations. It lives in
 // Go rather than a .sql file because SQLite has no ADD COLUMN IF NOT EXISTS:
 // the honest way to be idempotent is to look at PRAGMA table_info and add
@@ -208,6 +225,14 @@ func migrateRetrievalOpens(db *sql.DB) error {
 // CLI call) serialise on the write lock — the loser re-checks inside its own
 // transaction and finds nothing left to do.
 func addColumns(db *sql.DB, version int, name, table string, cols ...column) error {
+	return addColumnsWith(db, version, name, table, nil, cols...)
+}
+
+// addColumnsWith is addColumns plus extra statements, such as an index on a
+// new column, run after the ALTERs and before the version is recorded, all in
+// the same transaction. Each must be idempotent (IF NOT EXISTS), because a
+// re-run after a partial failure executes it again.
+func addColumnsWith(db *sql.DB, version int, name, table string, extra []string, cols ...column) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin migration %03d: %w", version, err)
@@ -239,6 +264,11 @@ func addColumns(db *sql.DB, version int, name, table string, cols ...column) err
 		}
 		if _, err := tx.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + c.name + ` ` + c.decl); err != nil {
 			return fmt.Errorf("add %s.%s: %w", table, c.name, err)
+		}
+	}
+	for _, stmt := range extra {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("migration %03d: %w", version, err)
 		}
 	}
 	if _, err := tx.Exec(`INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (?, ?)`, version, name); err != nil {
