@@ -341,6 +341,7 @@ SELECT p.id,
 SELECT seq, role, kind, tool_name, content, created_at
   FROM messages
  WHERE session_id = :session_id
+   AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = :session_id AND s.project_id = :project_id) -- another project's session reads as absent, as in GetChunk
    AND seq BETWEEN :from_seq AND :to_seq
    AND kind <> 'thinking'                          -- reasoning traces rarely help retrieval
    AND (:include_tools = 1 OR kind = 'text')
@@ -353,6 +354,7 @@ SELECT seq, role, kind, tool_name, content, created_at
 SELECT MIN(seq)
   FROM messages
  WHERE session_id = :session_id
+   AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = :session_id AND s.project_id = :project_id)
    AND seq > :after_seq
    AND kind <> 'thinking'
    AND (:include_tools = 1 OR kind = 'text');

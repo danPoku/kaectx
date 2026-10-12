@@ -89,11 +89,11 @@ func (s *server) getChunk(_ context.Context, _ *mcp.CallToolRequest, args getChu
 	// rank. A chunk ID alone cannot identify the originating search for certain
 	// when agents run concurrently, so an open inferred from it is flagged.
 	if args.RunID != "" && args.Rank > 0 {
-		if s.recordOpen(args.RunID, args.Rank, args.ChunkID, false) {
+		if s.recordOpen(args.RunID, args.Rank, false, `chunk_id=?`, args.ChunkID) {
 			out.FeedbackTarget = &feedbackTarget{RunID: args.RunID, Rank: args.Rank}
 			out.OpenRecorded = true
 		}
-	} else if runID, rank, ok := s.inferOpenTarget(args.ChunkID); ok && s.recordOpen(runID, rank, args.ChunkID, true) {
+	} else if runID, rank, ok := s.inferOpenTarget(args.ChunkID); ok && s.recordOpen(runID, rank, true, `chunk_id=?`, args.ChunkID) {
 		// Most agents call get_chunk(chunk_id) and nothing else, which used to
 		// leave no trace and so nothing to label. Attributing the read to the
 		// search that most recently showed this chunk recovers those opens;
@@ -102,12 +102,17 @@ func (s *server) getChunk(_ context.Context, _ *mcp.CallToolRequest, args getChu
 		out.OpenRecorded, out.OpenInferred = true, true
 	}
 	if out.FeedbackTarget != nil {
-		// Asking in the result, at the moment of use, works better than the
-		// server instructions an agent read once at the start of the session.
-		out.NextStep = fmt.Sprintf("Once you know whether this helped, call record_retrieval_outcome(run_id=%q, rank=%d, outcome=helpful|unhelpful|stale|incorrect|superseded).",
-			out.FeedbackTarget.RunID, out.FeedbackTarget.Rank)
+		out.NextStep = labelStep(*out.FeedbackTarget)
 	}
 	return nil, out, nil
+}
+
+// labelStep is the labelling call for an opened hit. Asking in the result, at
+// the moment of use, works better than the server instructions an agent read
+// once at the start of the session.
+func labelStep(t feedbackTarget) string {
+	return fmt.Sprintf("Once you know whether this helped, call record_retrieval_outcome(run_id=%q, rank=%d, outcome=helpful|unhelpful|stale|incorrect|superseded).",
+		t.RunID, t.Rank)
 }
 
 // inferOpenWindow bounds how far back inferOpenTarget looks for the search an
@@ -174,7 +179,12 @@ func (s *server) inferOpenTarget(chunkID int64) (runID string, rank int, ok bool
 // retrieval_open_events, in one transaction, so the two never disagree. It is
 // fail-open: an observer failure must never hide context that was read
 // successfully, so errors only mean the open goes unrecorded.
-func (s *server) recordOpen(runID string, rank int, chunkID int64, inferred bool) bool {
+//
+// match is a condition on retrieval_candidates, with its arguments, that the
+// read must satisfy for the open to count: get_chunk requires the same chunk,
+// get_session a returned range that overlaps the hit. It is always a constant
+// written in this package, never caller input.
+func (s *server) recordOpen(runID string, rank int, inferred bool, match string, matchArgs ...any) bool {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return false
@@ -192,9 +202,9 @@ func (s *server) recordOpen(runID string, rank int, chunkID int64, inferred bool
 			END,
 			open_count=open_count+1,
 			inferred_open_count=inferred_open_count+?
-		WHERE run_id=? AND rank=? AND chunk_id=? AND EXISTS (
+		WHERE run_id=? AND rank=? AND (`+match+`) AND EXISTS (
 			SELECT 1 FROM retrieval_runs rr WHERE rr.id=retrieval_candidates.run_id AND rr.project_id=?
-		)`, inferred, runID, rank, chunkID, s.projectID)
+		)`, append(append([]any{inferred, runID, rank}, matchArgs...), s.projectID)...)
 	if err != nil {
 		return false
 	}
