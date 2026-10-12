@@ -1,6 +1,27 @@
+<div align="center">
+
 # kaectx
 
-*kaectx (formerly ctx). The command is still `ctx`.*
+### One local memory for every coding agent on your machine.
+
+**Claude Code and Codex can search each other's past sessions. Nothing leaves your machine.**
+
+[![Release](https://img.shields.io/github/v/release/danPoku/kaectx?label=release&color=2ea44f)](https://github.com/danPoku/kaectx/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/danPoku/kaectx/test.yml?branch=master&label=CI)](https://github.com/danPoku/kaectx/actions/workflows/test.yml)
+[![Go](https://img.shields.io/github/go-mod/go-version/danPoku/kaectx?logo=go&logoColor=white)](go.mod)
+[![MCP](https://img.shields.io/badge/MCP-12%20tools-6f42c1)](#tools)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20WSL2%20%7C%20Windows-0969da)](#install)
+[![License](https://img.shields.io/github/license/danPoku/kaectx?color=yellow)](LICENSE)
+
+[Quick start](#quick-start) · [How it works](#how-it-works) · [MCP tools](#tools) · [Commands](#commands) · [Privacy](#privacy) · [Limitations](#limitations) · [Contributing](CONTRIBUTING.md)
+
+```
+go install -tags sqlite_fts5 github.com/danPoku/kaectx/cmd/ctx@latest
+```
+
+<sub>kaectx was called ctx until v0.1.3. The command, the database and the MCP server name are still <code>ctx</code>.</sub>
+
+</div>
 
 kaectx keeps one searchable copy of your coding-agent conversations, and lets any
 agent search it.
