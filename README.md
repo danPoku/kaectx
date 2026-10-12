@@ -333,7 +333,7 @@ first_seq and last_seq rather than paging from the start.
 | `ctx project list` | Show projects, their remotes, session counts and known paths. |
 | `ctx project merge <from> <into>` | Fold one project into another. |
 | `ctx audit-secrets` | Re-scan stored text with the current redaction rules and report rows and rule names (never the matched text). Exits non-zero on findings. Changes nothing. |
-| `ctx doctor` | Report ingestion, embedding, retrieval and outcome health for the current project. |
+| `ctx doctor` | Report the current project's sessions, embedding backlog, retrievals and outcomes, plus database-wide source, ingest-error and unassigned-chunk counts. |
 | `ctx mcp` | Serve MCP over stdio. Catches up on unread session logs in the background. |
 | `ctx daemon` | Ingest and embed continuously. |
 
