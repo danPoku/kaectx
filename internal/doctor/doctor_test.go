@@ -96,6 +96,44 @@ func TestCollectReportsCorpusAndRetrievalHealth(t *testing.T) {
 	}
 }
 
+// TestCollectCountsLabelsAcrossRechunking checks that doctor's coverage uses
+// governance's anchor rule: labels recorded against an old, narrower range
+// still cover the rebuilt chunk that contains them.
+func TestCollectCountsLabelsAcrossRechunking(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "ctx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.Exec(`INSERT INTO projects(name) VALUES ('p')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := res.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO retrieval_runs(id,project_id,surface,query,requested_limit,mode,duration_ms,result_count) VALUES ('r',?,'mcp','q',10,'keyword',1,1)`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	// Today's chunk spans 5-12; the three labels were recorded when it was 5-8.
+	if _, err := db.Exec(`INSERT INTO retrieval_candidates(run_id,rank,evidence_key,session_id,first_seq,last_seq,score,score_kind) VALUES ('r',1,?,'s',5,12,1,'bm25')`, store.EvidenceKey("s", 5, 12)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := db.Exec(`INSERT INTO memory_observations(project_id,evidence_key,session_id,anchor_seq,outcome) VALUES (?,?,'s',5,'stale')`, projectID, store.EvidenceKey("s", 5, 8)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := doctor.Collect(context.Background(), db, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.RetrievedEvidence != 1 || r.ObservedEvidence != 1 || r.CredibleEvidence != 1 {
+		t.Errorf("coverage = retrieved %d observed %d credible %d, want 1/1/1", r.RetrievedEvidence, r.ObservedEvidence, r.CredibleEvidence)
+	}
+}
+
 func TestCollectEmptyProjectHasZeroCoverage(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "ctx.db"))
 	if err != nil {

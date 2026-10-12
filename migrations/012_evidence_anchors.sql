@@ -1,0 +1,13 @@
+-- Migration 012: anchor each label to a message, not to an exact chunk range.
+--
+-- memory_observations.evidence_key hashes session_id + first_seq + last_seq,
+-- so when chunks are rebuilt with new bounds (ctx repair messages, or a
+-- settled tail later folded into its turn) every label on the old range
+-- stopped matching. session_id + anchor_seq record the session and first
+-- message of the labelled exchange; governance matches a label to whichever
+-- chunk contains that message today.
+--
+-- The migration needs a Go backfill (hashing current chunks to recover
+-- anchors for labels whose run was pruned), so store.migrateEvidenceAnchors
+-- adds the columns, backfills and records schema migration 012 in one
+-- transaction.

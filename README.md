@@ -353,6 +353,12 @@ source and confidence plus the exact session or retrieval run/rank needed to
 resolve it. This avoids a separate always-running helper and works with stdio MCP
 clients, which cannot receive unsolicited prompts reliably.
 
+A label is anchored to the first message of the exchange it judged, and counts
+toward whichever chunk contains that message today. Labels therefore survive
+`ctx repair messages` rebuilding chunks with new bounds. When chunks merge, the
+merged chunk carries every label anchored inside it. When a chunk splits, its
+labels stay with the part that holds the original question.
+
 The observer deliberately records no inferred helpful/unhelpful label. An open
 only proves that evidence was inspected, while a missing checkpoint decision
 only proves that CTX has not recorded the choice. Explicit outcome tools remain

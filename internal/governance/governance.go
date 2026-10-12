@@ -10,7 +10,7 @@ package governance
 import (
 	"context"
 	"database/sql"
-	"strings"
+	"encoding/json"
 )
 
 const (
@@ -32,79 +32,105 @@ type Assessment struct {
 	Neutral      bool
 }
 
+// Evidence is one retrieved exchange as it stands now: its exact range and
+// that range's evidence key.
+type Evidence struct {
+	Key       string
+	SessionID string
+	FirstSeq  int
+	LastSeq   int
+}
+
+// matchObservations is the one rule for which labels count toward a piece of
+// evidence, shared by Assess, AssessMany and ctx doctor's coverage report.
+//
+// A label is anchored to the first message of the exchange it judged
+// (session_id, anchor_seq). It counts toward whichever exchange contains that
+// message today, so labels survive chunks being rebuilt with new bounds:
+//   - a range that grows, or two chunks that merge, keeps every label anchored
+//     inside it (the merged exchange contains exactly the judged text);
+//   - a chunk that splits keeps its labels with the part holding the anchor,
+//     the original question, and the other part starts unlabelled.
+//
+// A label whose anchor could not be recovered (anchor_seq NULL) still matches
+// its exact original range by evidence key.
+//
+// It expects the candidate columns as c.k, c.s, c.f, c.l and the observation
+// alias mo.
+const matchObservations = `mo.project_id = ? AND (
+		(mo.anchor_seq IS NOT NULL AND mo.session_id = c.s AND mo.anchor_seq BETWEEN c.f AND c.l)
+		OR (mo.anchor_seq IS NULL AND mo.evidence_key = c.k))`
+
+// MatchObservationsSQL exposes matchObservations to ctx doctor, which must
+// count coverage by the same rule governance assesses by.
+func MatchObservationsSQL() string { return matchObservations }
+
 // Assess estimates reliability with actuarial credibility.
 // The portfolio prior is deliberately 1.0: without enough evidence, this
 // observer cannot penalize an otherwise relevant memory.
-func Assess(db *sql.DB, projectID int64, evidenceKey string) (Assessment, error) {
-	return AssessContext(context.Background(), db, projectID, evidenceKey)
+func Assess(db *sql.DB, projectID int64, e Evidence) (Assessment, error) {
+	return AssessContext(context.Background(), db, projectID, e)
 }
 
-func AssessContext(ctx context.Context, db *sql.DB, projectID int64, evidenceKey string) (Assessment, error) {
-	a := Assessment{EvidenceKey: evidenceKey, Reliability: 1, Neutral: true}
-	err := db.QueryRowContext(ctx, `SELECT COUNT(*),
-		COALESCE(SUM(CASE WHEN outcome='helpful' THEN 1 ELSE 0 END),0),
-		COALESCE(SUM(CASE WHEN outcome IN ('unhelpful','stale','incorrect','superseded') THEN 1 ELSE 0 END),0)
-		FROM memory_observations WHERE project_id=? AND evidence_key=?`, projectID, evidenceKey).
-		Scan(&a.Observations, &a.Positive, &a.Negative)
+func AssessContext(ctx context.Context, db *sql.DB, projectID int64, e Evidence) (Assessment, error) {
+	got, err := AssessMany(ctx, db, projectID, []Evidence{e})
 	if err != nil {
-		return a, err
+		return Assessment{EvidenceKey: e.Key, Reliability: 1, Neutral: true}, err
 	}
-	finalize(&a)
-	return a, nil
+	return got[e.Key], nil
 }
 
-// AssessMany evaluates a result set in bounded batches, avoiding one query
-// and one busy-timeout window per candidate. Keys without observations are
-// returned as explicitly neutral assessments.
-func AssessMany(ctx context.Context, db *sql.DB, projectID int64, evidenceKeys []string) (map[string]Assessment, error) {
-	out := make(map[string]Assessment, len(evidenceKeys))
-	unique := make([]string, 0, len(evidenceKeys))
-	for _, key := range evidenceKeys {
-		if _, ok := out[key]; ok {
+// AssessMany evaluates a result set in one query. The candidates travel as a
+// single JSON parameter, so no result-set size can reach SQLite's bound
+// variable limit. Evidence without matching labels comes back explicitly
+// neutral. The map is keyed by evidence key.
+func AssessMany(ctx context.Context, db *sql.DB, projectID int64, evidence []Evidence) (map[string]Assessment, error) {
+	out := make(map[string]Assessment, len(evidence))
+	type row struct {
+		K string `json:"k"`
+		S string `json:"s"`
+		F int    `json:"f"`
+		L int    `json:"l"`
+	}
+	unique := make([]row, 0, len(evidence))
+	for _, e := range evidence {
+		if _, ok := out[e.Key]; ok {
 			continue
 		}
-		out[key] = Assessment{EvidenceKey: key, Reliability: 1, Neutral: true}
-		unique = append(unique, key)
+		out[e.Key] = Assessment{EvidenceKey: e.Key, Reliability: 1, Neutral: true}
+		unique = append(unique, row{e.Key, e.SessionID, e.FirstSeq, e.LastSeq})
 	}
-	const batchSize = 500 // comfortably below SQLite's common variable limit
-	for start := 0; start < len(unique); start += batchSize {
-		end := start + batchSize
-		if end > len(unique) {
-			end = len(unique)
-		}
-		batch := unique[start:end]
-		args := make([]any, 0, len(batch)+1)
-		args = append(args, projectID)
-		marks := make([]string, len(batch))
-		for i, key := range batch {
-			marks[i] = "?"
-			args = append(args, key)
-		}
-		rows, err := db.QueryContext(ctx, `SELECT evidence_key, COUNT(*),
-			COALESCE(SUM(CASE WHEN outcome='helpful' THEN 1 ELSE 0 END),0),
-			COALESCE(SUM(CASE WHEN outcome IN ('unhelpful','stale','incorrect','superseded') THEN 1 ELSE 0 END),0)
-			FROM memory_observations WHERE project_id=? AND evidence_key IN (`+strings.Join(marks, ",")+`)
-			GROUP BY evidence_key`, args...)
-		if err != nil {
+	if len(unique) == 0 {
+		return out, nil
+	}
+	payload, err := json.Marshal(unique)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, `WITH c(k, s, f, l) AS (
+			SELECT json_extract(value,'$.k'), json_extract(value,'$.s'),
+			       json_extract(value,'$.f'), json_extract(value,'$.l')
+			  FROM json_each(?)
+		)
+		SELECT c.k, COUNT(*),
+			COALESCE(SUM(CASE WHEN mo.outcome='helpful' THEN 1 ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN mo.outcome IN ('unhelpful','stale','incorrect','superseded') THEN 1 ELSE 0 END),0)
+		  FROM c JOIN memory_observations mo ON `+matchObservations+`
+		 GROUP BY c.k`, string(payload), projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a Assessment
+		if err := rows.Scan(&a.EvidenceKey, &a.Observations, &a.Positive, &a.Negative); err != nil {
 			return nil, err
 		}
-		for rows.Next() {
-			var a Assessment
-			if err := rows.Scan(&a.EvidenceKey, &a.Observations, &a.Positive, &a.Negative); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			a.Reliability, a.Neutral = 1, true
-			finalize(&a)
-			out[a.EvidenceKey] = a
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		rows.Close()
+		a.Reliability, a.Neutral = 1, true
+		finalize(&a)
+		out[a.EvidenceKey] = a
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // finalize blends the evidence's own helpful rate with the 1.0 prior,
