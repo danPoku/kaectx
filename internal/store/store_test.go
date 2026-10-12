@@ -223,6 +223,46 @@ func TestMigrateRetrievalOpensRecoversPartialSchema(t *testing.T) {
 	}
 }
 
+// TestMigrateInferredOpensIsAtomic checks that migration 011's index lands in
+// the same transaction as its column and version row: a failing extra
+// statement leaves neither behind, and a successful run leaves all three.
+func TestMigrateInferredOpensIsAtomic(t *testing.T) {
+	db := openTestDB(t)
+	mustExec(t, db, `CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL) STRICT;
+		CREATE TABLE retrieval_candidates (run_id TEXT NOT NULL, rank INTEGER NOT NULL, chunk_id INTEGER) STRICT;`)
+
+	err := addColumnsWith(db, 11, "inferred_opens", "retrieval_candidates",
+		[]string{`CREATE INDEX idx_broken ON no_such_table(x)`},
+		column{"inferred_open_count", "INTEGER NOT NULL DEFAULT 0"})
+	if err == nil {
+		t.Fatal("expected an error from the failing index statement")
+	}
+	var columns, versions int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('retrieval_candidates') WHERE name='inferred_open_count'`).Scan(&columns); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version=11`).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if columns != 0 || versions != 0 {
+		t.Fatalf("after a failed extra statement: column=%d version rows=%d, want 0 and 0", columns, versions)
+	}
+
+	if err := migrateInferredOpens(db); err != nil {
+		t.Fatalf("migrateInferredOpens: %v", err)
+	}
+	var indexes int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_retrieval_candidates_chunk'`).Scan(&indexes); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version=11`).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if indexes != 1 || versions != 1 {
+		t.Fatalf("after migrateInferredOpens: index=%d version rows=%d, want 1 and 1", indexes, versions)
+	}
+}
+
 func TestMigrateAddsSessionGitColumnsToExistingDatabase(t *testing.T) {
 	db := openTestDB(t)
 	if _, err := db.Exec(`CREATE TABLE schema_migrations (
