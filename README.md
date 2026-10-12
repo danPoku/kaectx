@@ -37,7 +37,7 @@ It is a single Go binary. Everything stays on your machine.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.png">
-  <img alt="Claude Code and Codex session logs are read by ctx's adapters, redacted, and written to one SQLite file (ctx.db) with FTS5 and sqlite-vec indexes. An optional local Ollama embeds chunks into vectors. Hybrid search fuses keyword and vector results, and the MCP server and CLI hand the context back to any agent, whose new sessions are ingested in turn." src="docs/diagrams/architecture.png">
+  <img alt="Claude Code and Codex session logs are read by ctx's adapters, redacted, and written to one SQLite file (ctx.db) with FTS5 and sqlite-vec indexes. An optional Ollama server, localhost by default, embeds chunks into vectors. Hybrid search fuses keyword and vector results, and the MCP server and CLI hand the context back to any agent, whose new sessions are ingested in turn." src="docs/diagrams/architecture.png">
 </picture>
 
 ```
