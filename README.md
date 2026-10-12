@@ -295,8 +295,8 @@ a new chat.
 
 | Tool | What it does |
 | --- | --- |
-| `search_context` | Keyword plus semantic search over past sessions in this project, across all agents. Returns snippets centred on the match, each with the time of the turn and the message range (`first_seq`, `last_seq`) of the exchange it came from. `since`/`until` limit it to one period. |
-| `get_chunk` | Reads one search hit in full, the user turn and the assistant's reply (about 1k tokens), by `chunk_id`. Pass the search run ID and hit rank to record the exact result as opened. |
+| `search_context` | Keyword plus semantic search over past sessions in this project, across all agents. Returns snippets centred on the match, each with the time of the turn, the message range (`first_seq`, `last_seq`) of the exchange it came from, and a `next_step` holding the exact `get_chunk` call that opens it. The search's ID is `run_id`; `retrieval_run_id` carries the same value and is deprecated. `since`/`until` limit it to one period. |
+| `get_chunk` | Reads one search hit in full, the user turn and the assistant's reply (about 1k tokens), by `chunk_id`. Pass the search's `run_id` and the hit's `rank` together to record the exact result as opened; passing only one of them is an error. With `chunk_id` alone, the open is attributed to the latest search in the past day that returned the chunk and flagged `open_inferred`. When an open is recorded, `next_step` holds the `record_retrieval_outcome` call that labels it. |
 | `get_session` | Reads a session's messages in order. Conversation text only unless `include_tools` is set; capped by total characters (`max_chars`, default 20000) and by message length, with `next_from_seq` for paging. |
 | `recent_sessions` | Lists recent sessions, newest first; `since`/`until` list the sessions active in a period. |
 | `sessions_touching` | Sessions that read or edited a given file. |
@@ -318,6 +318,15 @@ useful. Once the agent knows whether the context influenced its answer or work,
 it calls `record_retrieval_outcome` with that search run ID and rank. `ctx doctor` reports the
 seven-day funnel from opened results to explicit labels, making missing feedback
 visible instead of silently leaving risk-aware retrieval neutral.
+
+Agents often read a hit with `get_chunk(chunk_id)` and nothing else. ctx then
+attributes the open to the latest MCP search in the past day that returned that
+chunk. If an earlier search returned the same chunk within five minutes of that
+one, ctx records nothing, because the read could follow either. Even outside
+that gap the guess can name the wrong search, so inferred opens are counted
+separately (`inferred_open_count`), `feedback_status` asks about them at medium
+rather than high confidence, and `ctx doctor` shows exact and inferred opens
+apart.
 
 ### Checkpoint signals
 

@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,8 +118,10 @@ func TestSearchContext(t *testing.T) {
 			SessionID string `json:"session_id"`
 			Agent     string `json:"agent"`
 			Snippet   string `json:"snippet"`
+			NextStep  string `json:"next_step"`
 		} `json:"results"`
 		UsedSemanticSearch bool   `json:"used_semantic_search"`
+		RunID              string `json:"run_id"`
 		RetrievalRunID     string `json:"retrieval_run_id"`
 		TelemetryRecorded  bool   `json:"telemetry_recorded"`
 	}
@@ -143,11 +146,21 @@ func TestSearchContext(t *testing.T) {
 	if out.UsedSemanticSearch {
 		t.Error("UsedSemanticSearch = true, want false (brokenEmbedder always fails)")
 	}
-	if out.RetrievalRunID == "" {
-		t.Error("RetrievalRunID is empty, want recorded telemetry")
+	if out.RunID == "" {
+		t.Error("RunID is empty, want recorded telemetry")
+	}
+	// retrieval_run_id is the deprecated name, kept for one release.
+	if out.RetrievalRunID != out.RunID {
+		t.Errorf("retrieval_run_id = %q, want the same value as run_id %q", out.RetrievalRunID, out.RunID)
 	}
 	if !out.TelemetryRecorded {
 		t.Error("TelemetryRecorded = false, want true")
+	}
+	// The hint must carry all three arguments, or following it records no
+	// exact open.
+	wantStep := fmt.Sprintf("get_chunk(chunk_id=%d, run_id=%q, rank=1)", out.Results[0].ChunkID, out.RunID)
+	if out.Results[0].NextStep != wantStep {
+		t.Errorf("NextStep = %q, want %q", out.Results[0].NextStep, wantStep)
 	}
 }
 
@@ -509,6 +522,85 @@ func TestSearchContextReturnsMessageRange(t *testing.T) {
 	}
 }
 
+// ageRuns moves every recorded search back in time by modifier (an SQLite
+// date modifier such as "-10 minutes"), so a test can set up searches that
+// happened apart without sleeping.
+func ageRuns(t *testing.T, db *sql.DB, modifier string) {
+	t.Helper()
+	if _, err := db.Exec(`UPDATE retrieval_runs
+		SET created_at=strftime('%Y-%m-%dT%H:%M:%fZ', created_at, ?)`, modifier); err != nil {
+		t.Fatalf("age runs: %v", err)
+	}
+}
+
+// inferredRead calls get_chunk with chunk_id alone and reports whether an
+// open was recorded and against which run.
+func inferredRead(t *testing.T, cs *sdkmcp.ClientSession, chunkID int64) (recorded bool, runID string) {
+	t.Helper()
+	var out struct {
+		OpenRecorded   bool `json:"open_recorded"`
+		FeedbackTarget *struct {
+			RunID string `json:"run_id"`
+		} `json:"feedback_target"`
+	}
+	callTool(t, cs, "get_chunk", map[string]any{"chunk_id": chunkID}, &out)
+	if out.FeedbackTarget != nil {
+		runID = out.FeedbackTarget.RunID
+	}
+	return out.OpenRecorded, runID
+}
+
+// TestGetChunkInferenceAbstains covers the cases where a chunk_id-only read
+// must record nothing rather than guess which search it came from.
+func TestGetChunkInferenceAbstains(t *testing.T) {
+	search := func(t *testing.T, cs *sdkmcp.ClientSession) (chunkID int64, runID string) {
+		t.Helper()
+		var out struct {
+			RunID   string `json:"run_id"`
+			Results []struct {
+				ChunkID int64 `json:"chunk_id"`
+			} `json:"results"`
+		}
+		callTool(t, cs, "search_context", map[string]any{"query": "WAL"}, &out)
+		if len(out.Results) != 1 {
+			t.Fatalf("search results = %d, want 1", len(out.Results))
+		}
+		return out.Results[0].ChunkID, out.RunID
+	}
+
+	t.Run("two searches within the gap", func(t *testing.T) {
+		cs, db := testServer(t)
+		chunkID, _ := search(t, cs)
+		ageRuns(t, db, "-2 minutes")
+		search(t, cs)
+		if recorded, runID := inferredRead(t, cs, chunkID); recorded {
+			t.Errorf("open recorded against %q, want none: either search could be the source", runID)
+		}
+	})
+
+	t.Run("search older than the window", func(t *testing.T) {
+		cs, db := testServer(t)
+		chunkID, _ := search(t, cs)
+		ageRuns(t, db, "-25 hours")
+		if recorded, runID := inferredRead(t, cs, chunkID); recorded {
+			t.Errorf("open recorded against %q, want none: the only search is over a day old", runID)
+		}
+	})
+
+	for _, surface := range []string{"cli", "internal"} {
+		t.Run(surface+" searches are not matched", func(t *testing.T) {
+			cs, db := testServer(t)
+			chunkID, runID := search(t, cs)
+			if _, err := db.Exec(`UPDATE retrieval_runs SET surface=? WHERE id=?`, surface, runID); err != nil {
+				t.Fatal(err)
+			}
+			if recorded, got := inferredRead(t, cs, chunkID); recorded {
+				t.Errorf("open recorded against %s search %q, want none", surface, got)
+			}
+		})
+	}
+}
+
 func TestGetChunk(t *testing.T) {
 	cs, db := testServer(t)
 
@@ -532,6 +624,8 @@ func TestGetChunk(t *testing.T) {
 		LastSeq        int    `json:"last_seq"`
 		Text           string `json:"text"`
 		OpenRecorded   bool   `json:"open_recorded"`
+		OpenInferred   bool   `json:"open_inferred"`
+		NextStep       string `json:"next_step"`
 		FeedbackTarget *struct {
 			RunID string `json:"run_id"`
 			Rank  int    `json:"rank"`
@@ -552,28 +646,117 @@ func TestGetChunk(t *testing.T) {
 	if !out.OpenRecorded || out.FeedbackTarget == nil || out.FeedbackTarget.RunID != hit.RetrievalRunID || out.FeedbackTarget.Rank != 1 {
 		t.Fatalf("feedback target = %+v, want the search run at rank 1", out.FeedbackTarget)
 	}
+	if out.OpenInferred {
+		t.Error("OpenInferred = true for a call that passed run_id and rank, want an exact open")
+	}
+	wantStep := fmt.Sprintf("record_retrieval_outcome(run_id=%q, rank=1,", hit.RetrievalRunID)
+	if !strings.Contains(out.NextStep, wantStep) {
+		t.Errorf("NextStep = %q, want it to contain %q", out.NextStep, wantStep)
+	}
 	var openedAt sql.NullString
-	var openCount int
-	if err := db.QueryRow(`SELECT opened_at,open_count FROM retrieval_candidates
-		WHERE run_id=? AND rank=?`, out.FeedbackTarget.RunID, out.FeedbackTarget.Rank).Scan(&openedAt, &openCount); err != nil {
+	var openCount, inferredCount int
+	if err := db.QueryRow(`SELECT opened_at,open_count,inferred_open_count FROM retrieval_candidates
+		WHERE run_id=? AND rank=?`, out.FeedbackTarget.RunID, out.FeedbackTarget.Rank).Scan(&openedAt, &openCount, &inferredCount); err != nil {
 		t.Fatal(err)
 	}
-	if !openedAt.Valid || openCount != 1 {
-		t.Errorf("open telemetry = %v count %d, want timestamp and count 1", openedAt, openCount)
+	if !openedAt.Valid || openCount != 1 || inferredCount != 0 {
+		t.Errorf("open telemetry = %v count %d inferred %d, want timestamp, count 1, inferred 0", openedAt, openCount, inferredCount)
 	}
 
-	t.Run("direct read is untracked", func(t *testing.T) {
+	t.Run("chunk_id alone is attributed to the latest search", func(t *testing.T) {
+		// A second search returns the same chunk; the read belongs to it,
+		// not to the older one above. The older one is pushed back past
+		// the ambiguity gap so the two are not near-simultaneous.
+		ageRuns(t, db, "-10 minutes")
+		var latest struct {
+			RunID string `json:"run_id"`
+		}
+		callTool(t, cs, "search_context", map[string]any{"query": "WAL"}, &latest)
 		var direct struct {
 			Text           string `json:"text"`
 			OpenRecorded   bool   `json:"open_recorded"`
+			OpenInferred   bool   `json:"open_inferred"`
+			NextStep       string `json:"next_step"`
 			FeedbackTarget *struct {
 				RunID string `json:"run_id"`
 				Rank  int    `json:"rank"`
 			} `json:"feedback_target"`
 		}
 		callTool(t, cs, "get_chunk", map[string]any{"chunk_id": hit.Results[0].ChunkID}, &direct)
-		if direct.Text == "" || direct.OpenRecorded || direct.FeedbackTarget != nil {
-			t.Fatalf("direct read = %+v, want content without attribution", direct)
+		if direct.Text == "" || !direct.OpenRecorded || !direct.OpenInferred {
+			t.Fatalf("direct read = %+v, want content with an inferred open", direct)
+		}
+		if direct.FeedbackTarget == nil || direct.FeedbackTarget.RunID != latest.RunID || direct.FeedbackTarget.Rank != 1 {
+			t.Fatalf("feedback target = %+v, want the latest search %q at rank 1", direct.FeedbackTarget, latest.RunID)
+		}
+		if !strings.Contains(direct.NextStep, latest.RunID) {
+			t.Errorf("NextStep = %q, want the inferred run id", direct.NextStep)
+		}
+		var openCount, inferredCount int
+		if err := db.QueryRow(`SELECT open_count,inferred_open_count FROM retrieval_candidates
+			WHERE run_id=? AND rank=1`, latest.RunID).Scan(&openCount, &inferredCount); err != nil {
+			t.Fatal(err)
+		}
+		if openCount != 1 || inferredCount != 1 {
+			t.Errorf("open_count/inferred_open_count = %d/%d, want 1/1", openCount, inferredCount)
+		}
+
+		// The inferred open is now something the observer can ask about.
+		// Its nudge must not claim the confidence of an exact open.
+		var status struct {
+			Nudges []struct {
+				Kind       string `json:"kind"`
+				Source     string `json:"source"`
+				Confidence string `json:"confidence"`
+				RunID      string `json:"run_id"`
+				Rank       int    `json:"rank"`
+			} `json:"nudges"`
+		}
+		callTool(t, cs, "feedback_status", map[string]any{}, &status)
+		found := false
+		for _, n := range status.Nudges {
+			if n.Kind == "retrieval_outcome_missing" && n.RunID == latest.RunID && n.Rank == 1 {
+				found = true
+				if n.Source != "inferred_open" || n.Confidence != "medium" {
+					t.Errorf("inferred nudge source/confidence = %q/%q, want inferred_open/medium", n.Source, n.Confidence)
+				}
+			}
+			if n.RunID == hit.RetrievalRunID && n.Confidence != "high" {
+				t.Errorf("exact-open nudge confidence = %q, want high", n.Confidence)
+			}
+		}
+		if !found {
+			t.Errorf("feedback_status nudges = %+v, want one for the inferred open", status.Nudges)
+		}
+	})
+
+	t.Run("half an exact target is an error", func(t *testing.T) {
+		for _, args := range []map[string]any{
+			{"chunk_id": hit.Results[0].ChunkID, "run_id": hit.RetrievalRunID},
+			{"chunk_id": hit.Results[0].ChunkID, "rank": 1},
+		} {
+			res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "get_chunk", Arguments: args})
+			if err == nil && !res.IsError {
+				t.Errorf("get_chunk(%v) succeeded, want an error naming both arguments", args)
+			}
+		}
+	})
+
+	t.Run("a chunk no search returned stays untracked", func(t *testing.T) {
+		res, err := db.Exec(`INSERT INTO chunks(session_id, first_seq, last_seq, text) VALUES ('claude-code:sess-1', 900, 901, 'never searched for')`)
+		if err != nil {
+			t.Fatalf("seed chunk: %v", err)
+		}
+		id, _ := res.LastInsertId()
+		var direct struct {
+			Text           string          `json:"text"`
+			OpenRecorded   bool            `json:"open_recorded"`
+			NextStep       string          `json:"next_step"`
+			FeedbackTarget json.RawMessage `json:"feedback_target"`
+		}
+		callTool(t, cs, "get_chunk", map[string]any{"chunk_id": id}, &direct)
+		if direct.Text == "" || direct.OpenRecorded || direct.FeedbackTarget != nil || direct.NextStep != "" {
+			t.Fatalf("read = %+v, want content with no attribution and no labelling hint", direct)
 		}
 	})
 

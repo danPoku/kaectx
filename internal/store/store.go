@@ -112,6 +112,9 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := applySQLMigration(db, 10, "010_feedback_observer.sql"); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := migrateInferredOpens(db); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
 }
 
@@ -197,6 +200,24 @@ func migrateRetrievalOpens(db *sql.DB) error {
 	return addColumns(db, 9, "retrieval_opens", "retrieval_candidates",
 		column{"opened_at", "TEXT"},
 		column{"open_count", "INTEGER NOT NULL DEFAULT 0"})
+}
+
+// migrateInferredOpens is migration 011: inferred_open_count counts the opens
+// get_chunk attributed to a search from chunk_id alone. Like a claim filed
+// without a policy number and matched to the most likely policy, it is still
+// evidence, but analysis must be able to set it aside.
+func migrateInferredOpens(db *sql.DB) error {
+	if err := addColumns(db, 11, "inferred_opens", "retrieval_candidates",
+		column{"inferred_open_count", "INTEGER NOT NULL DEFAULT 0"}); err != nil {
+		return err
+	}
+	// Inference looks candidates up by chunk_id, which no index covered.
+	// IF NOT EXISTS makes this safe to run on every Migrate.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_retrieval_candidates_chunk
+		ON retrieval_candidates(chunk_id)`); err != nil {
+		return fmt.Errorf("index retrieval_candidates.chunk_id: %w", err)
+	}
+	return nil
 }
 
 // addColumns is the shared shape of the ALTER-based migrations. It lives in
