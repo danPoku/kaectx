@@ -72,6 +72,32 @@ func TestApplyGovernanceReranksCrediblyNegativeEvidence(t *testing.T) {
 	}
 }
 
+// TestApplyGovernanceNeverDemotesConsistentlyHelpfulEvidence is the
+// regression test for issue #18: helpful labels used to lower reliability
+// below an unlabelled result's 1.0, so the top result fell behind the second.
+func TestApplyGovernanceNeverDemotesConsistentlyHelpfulEvidence(t *testing.T) {
+	for _, n := range []int{3, 10, 50} {
+		t.Run(fmt.Sprintf("%d of %d helpful", n, n), func(t *testing.T) {
+			db, projectID := openPolicyTestDB(t)
+			results := []Result{
+				{SessionID: "top", FirstSeq: 1, LastSeq: 2},
+				{SessionID: "second", FirstSeq: 3, LastSeq: 4},
+			}
+			addOutcome(t, db, projectID, evidenceKey(results[0]), "helpful", n)
+
+			if err := applyGovernance(context.Background(), db, projectID, results); err != nil {
+				t.Fatal(err)
+			}
+			if results[0].SessionID != "top" {
+				t.Fatalf("order = %s, %s; want the helpful result to keep rank 1", results[0].SessionID, results[1].SessionID)
+			}
+			if results[0].GovernanceNeutral || results[0].Reliability != 1 {
+				t.Errorf("helpful evidence = neutral %v reliability %.3f; want credible and 1.0", results[0].GovernanceNeutral, results[0].Reliability)
+			}
+		})
+	}
+}
+
 func TestApplyGovernanceKeepsSparseEvidenceExactlyNeutral(t *testing.T) {
 	db, projectID := openPolicyTestDB(t)
 	results := []Result{

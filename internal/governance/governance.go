@@ -32,7 +32,7 @@ type Assessment struct {
 	Neutral      bool
 }
 
-// Assess estimates reliability with beta smoothing and actuarial credibility.
+// Assess estimates reliability with actuarial credibility.
 // The portfolio prior is deliberately 1.0: without enough evidence, this
 // observer cannot penalize an otherwise relevant memory.
 func Assess(db *sql.DB, projectID int64, evidenceKey string) (Assessment, error) {
@@ -107,12 +107,21 @@ func AssessMany(ctx context.Context, db *sql.DB, projectID int64, evidenceKeys [
 	return out, nil
 }
 
+// finalize blends the evidence's own helpful rate with the 1.0 prior,
+// weighting it by credibility Z = n/(n+K).
+//
+// The helpful rate is used raw, not Laplace-smoothed. Credibility already
+// shrinks sparse experience toward the prior; smoothing it again toward 0.5
+// shrank twice, so even a perfect record scored below an unlabelled result
+// (3 of 3 helpful gave 0.925) and helpful labels demoted what they praised.
+// Like an underwriter blending a policy's own claims record with the book
+// rate: a clean record should never price worse than no record at all.
 func finalize(a *Assessment) {
 	if a.Observations < MinCredibleObservations {
 		return
 	}
 	a.Neutral = false
 	a.Credibility = float64(a.Observations) / (float64(a.Observations) + CredibilityK)
-	experience := float64(a.Positive+1) / float64(a.Observations+2)
+	experience := float64(a.Positive) / float64(a.Observations)
 	a.Reliability = (1 - a.Credibility) + a.Credibility*experience
 }
