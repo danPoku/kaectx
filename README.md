@@ -22,14 +22,15 @@ $ ctx search "how does the daemon embed new chunks in the background"
 
 ## Status
 
-Early. The current tagged release is v0.1.3; `master` includes unreleased
-work toward file-aware memory. Linux (including Ubuntu under WSL2) is the
+Early. The current tagged release is v0.2.0, which adds file-aware memory,
+retrieval outcome tracking, opt-in risk-aware search, checkpoint and feedback
+signals, `ctx doctor` and `ctx audit-secrets`. Linux (including Ubuntu under WSL2) is the
 primary environment; native Windows is also supported and tested. Expect
 breaking changes in the 0.x series, including to the database schema and the
 MCP tool output. See
 [Limitations](#limitations) before relying on it.
 
-Articles written before this work describe the v0.1.3 feature set. They are still
+Articles written before v0.2.0 describe the v0.1.3 feature set. They are still
 useful as snapshots of the original local-search release; pin `@v0.1.3` if you
 want exactly what those articles show.
 
@@ -50,7 +51,11 @@ want exactly what those articles show.
   took, and where to open the relevant exchange.
 - Serves the history over MCP, so Claude Code, Codex, or any MCP client can
   search it, page through a session, and save notes.
-- Redacts API keys and similar secrets before anything is written to disk.
+- Redacts API keys and similar secrets before anything is written to disk,
+  and can re-scan the stored history for anything the rules would now catch.
+- Records which search results agents opened and whether they helped, and can
+  use those outcomes to rerank later searches (opt-in).
+- Tells agents when a session has grown long enough to warrant a handoff.
 - Can run as a daemon that ingests sessions as they are written.
 
 ## Requirements
@@ -68,7 +73,7 @@ want exactly what those articles show.
 go install -tags sqlite_fts5 github.com/danPoku/kaectx/cmd/ctx@latest
 ```
 
-`@latest` follows the newest tagged release. To pin one, use `@v0.1.3`. Running
+`@latest` follows the newest tagged release. To pin one, use `@v0.2.0`. Running
 `go version -m "$(command -v ctx)"` shows which version you have installed.
 
 The repository and Go module were renamed from `ctx` to `kaectx` in v0.1.3. The
@@ -322,9 +327,13 @@ first_seq and last_seq rather than paging from the start.
 | `ctx init` | Create `~/.ctx` and the database. Other commands do this too if needed. |
 | `ctx ingest [--path FILE] [--agent A]` | One-shot ingest of the default directories, or of a single file. |
 | `ctx embed [--batch N]` | Embed pending chunks through Ollama. |
-| `ctx search <query> [--agent A] [--limit N] [--since D] [--until D]` | Search the current project. |
+| `ctx search <query> [--agent A] [--limit N] [--since D] [--until D] [--risk-aware]` | Search the current project. `--risk-aware` reranks using recorded retrieval outcomes. |
+| `ctx explain <path> [--limit N]` | Show sessions, actions and git span for a project-relative file. |
+| `ctx repair git\|touches\|messages [--dry-run]` | Bring data ingested by older versions up to date (see [Quick start](#quick-start)). |
 | `ctx project list` | Show projects, their remotes, session counts and known paths. |
 | `ctx project merge <from> <into>` | Fold one project into another. |
+| `ctx audit-secrets` | Re-scan stored text with the current redaction rules and report rows and rule names (never the matched text). Exits non-zero on findings. Changes nothing. |
+| `ctx doctor` | Report ingestion, embedding, retrieval and outcome health for the current project. |
 | `ctx mcp` | Serve MCP over stdio. Catches up on unread session logs in the background. |
 | `ctx daemon` | Ingest and embed continuously. |
 
