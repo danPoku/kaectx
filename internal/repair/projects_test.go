@@ -70,6 +70,7 @@ func misfiledDB(t *testing.T) projectsFixture {
 	session("claude-code:right", "claude-code", f.repo, "2026-09-20T09:00:00Z")
 	message("claude-code:right", "/work/repo", "2026-09-20T09:00:00Z", false)
 	message("claude-code:right", "/work", "2026-09-20T09:05:00Z", false)
+	exec1(t, db, `UPDATE sessions SET meta = '{"provisional_project":true}' WHERE id = 'claude-code:right'`)
 
 	// Only subagent lines stored: nothing trustworthy to re-file from.
 	session("claude-code:orphan", "claude-code", f.parent, "2026-09-20T08:00:00Z")
@@ -141,6 +142,15 @@ func TestProjectsRefilesSessionsByMainTranscript(t *testing.T) {
 		if project != tt.wantProject || start != tt.wantStart {
 			t.Errorf("%s = project %d, started %s; want project %d, started %s", tt.id, project, start, tt.wantProject, tt.wantStart)
 		}
+	}
+
+	var provisional int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE json_extract(meta, '$.provisional_project') IS NOT NULL
+	                         AND id IN ('claude-code:right', 'claude-code:misfiled')`).Scan(&provisional); err != nil {
+		t.Fatalf("provisional markers: %v", err)
+	}
+	if provisional != 0 {
+		t.Errorf("%d re-filed sessions keep a provisional marker, want none: the next ingested line could move them", provisional)
 	}
 
 	var touchProject int64

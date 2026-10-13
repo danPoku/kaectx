@@ -111,6 +111,12 @@ func Projects(db *sql.DB, dryRun bool) (ProjectsResult, error) {
 			continue
 		}
 		if s.project.Valid && s.project.Int64 == id {
+			// Right already, but a provisional marker left in place would
+			// let the next ingested line move it again.
+			if _, err := tx.Exec(`UPDATE sessions SET meta = json_remove(meta, '$.provisional_project')
+			                      WHERE id = ? AND json_extract(meta, '$.provisional_project') IS NOT NULL`, s.id); err != nil {
+				return res, fmt.Errorf("settle %s: %w", s.id, err)
+			}
 			continue
 		}
 		if _, err := tx.Exec(`UPDATE sessions SET project_id = ?, meta = json_remove(meta, '$.provisional_project')

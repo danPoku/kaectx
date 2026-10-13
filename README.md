@@ -184,8 +184,9 @@ that whole day, dates are UTC). Equally good matches are listed newest first.
 If some session logs haven't been ingested yet, it says so on stderr.
 
 After upgrading from an older version, run these once (add `--dry-run` to see
-what they would do first). Both read only what is already in the database, are
-safe to repeat, and run in a single transaction:
+what they would do first). Each is safe to repeat and runs in a single
+transaction. `messages` and `projects` read only what is already in the
+database; `touches` and `git` also read the sessions' git repositories:
 
 - `ctx repair touches` rebuilds file records for Codex `apply_patch` calls
   ingested before ctx could read them, from the patch text already stored.
