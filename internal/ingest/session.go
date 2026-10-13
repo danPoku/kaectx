@@ -40,11 +40,19 @@ func upsertSession(db *sql.DB, sessionID, agent string, upd SessionUpdate, msg *
 	}
 
 	var projectID sql.NullInt64
-	err := db.QueryRow(`SELECT project_id FROM sessions WHERE id = ?`, sessionID).Scan(&projectID)
+	var provisional bool
+	err := db.QueryRow(`SELECT project_id, json_extract(meta, '$.provisional_project') IS NOT NULL
+	                    FROM sessions WHERE id = ?`, sessionID).Scan(&projectID, &provisional)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
 	if err == nil {
+		// started_at keeps the earliest timestamp seen, not the first one
+		// ingested: a subagent transcript can be read before the main one
+		// (WalkDir visits "<id>/" before "<id>.jsonl"), and its first line
+		// is later than the session's. An empty started_at (the row was
+		// created by a line with no timestamp, such as an ai-title) is
+		// filled by the first line that has one.
 		_, err := db.Exec(`UPDATE sessions SET
 		                       cwd        = COALESCE(NULLIF(?, ''), cwd),
 		                       git_branch = COALESCE(NULLIF(?, ''), git_branch),
@@ -59,24 +67,42 @@ func upsertSession(db *sql.DB, sessionID, agent string, upd SessionUpdate, msg *
 		                           ELSE commit_source END,
 		                       model      = COALESCE(NULLIF(?, ''), model),
 		                       title      = COALESCE(NULLIF(?, ''), title, NULLIF(?, '')),
+		                       started_at = CASE WHEN ? <> '' AND (started_at = '' OR ? < started_at) THEN ? ELSE started_at END,
 		                       ended_at   = CASE WHEN ? > COALESCE(ended_at, '') THEN ? ELSE ended_at END
 		                     WHERE id = ?`,
 			upd.CWD, upd.GitBranch, upd.GitCommit, upd.GitCommit,
 			upd.CommitSource, upd.CommitSource, upd.CommitSource, upd.CommitSource,
-			upd.Model, upd.Title, fallbackTitle, upd.Timestamp, upd.Timestamp, sessionID)
-		return nullInt64ToAny(projectID), err
+			upd.Model, upd.Title, fallbackTitle, upd.Timestamp, upd.Timestamp,
+			upd.Timestamp, upd.Timestamp, upd.Timestamp, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		// The project is settled by the first main-transcript line with a
+		// cwd and never moves after that, however far the cwd drifts. Until
+		// then a project set by a subagent line is only provisional.
+		if upd.Sidechain || upd.CWD == "" || (projectID.Valid && !provisional) {
+			return nullInt64ToAny(projectID), nil
+		}
+		return settleProject(db, sessionID, upd.CWD)
 	}
 
 	// project_id stays NULL if we've never seen a cwd for this session —
 	// shouldn't happen with real Claude Code logs, but resolving "" would
 	// otherwise create a bogus project named ".".
 	var newProjectID any
+	meta := "{}"
 	if upd.CWD != "" {
 		id, err := store.ResolveProject(db, upd.CWD)
 		if err != nil {
 			return nil, err
 		}
 		newProjectID = id
+		// A subagent's project is better than none, so the session stays
+		// findable even if its main transcript is never read, but the main
+		// transcript's first line replaces it.
+		if upd.Sidechain {
+			meta = `{"provisional_project":true}`
+		}
 	}
 
 	title := upd.Title
@@ -84,13 +110,32 @@ func upsertSession(db *sql.DB, sessionID, agent string, upd SessionUpdate, msg *
 		title = fallbackTitle
 	}
 
-	_, err = db.Exec(`INSERT INTO sessions(id, agent, native_id, project_id, cwd, git_branch, starting_commit, ending_commit, commit_source, model, started_at, ended_at, title)
-	                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err = db.Exec(`INSERT INTO sessions(id, agent, native_id, project_id, cwd, git_branch, starting_commit, ending_commit, commit_source, model, started_at, ended_at, title, meta)
+	                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		sessionID, agent, upd.NativeID, newProjectID,
 		nullIfEmpty(upd.CWD), nullIfEmpty(upd.GitBranch), nullIfEmpty(upd.GitCommit), nullIfEmpty(upd.GitCommit),
 		nullIfEmpty(upd.CommitSource), nullIfEmpty(upd.Model),
-		upd.Timestamp, upd.Timestamp, nullIfEmpty(title))
+		upd.Timestamp, upd.Timestamp, nullIfEmpty(title), meta)
 	return newProjectID, err
+}
+
+// settleProject gives sessionID the project that owns cwd, clears the
+// provisional marker, and moves the session's file_touches along with it:
+// they were stamped with whatever project the session had when they were
+// recorded.
+func settleProject(db *sql.DB, sessionID, cwd string) (any, error) {
+	id, err := store.ResolveProject(db, cwd)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(`UPDATE sessions SET project_id = ?, meta = json_remove(meta, '$.provisional_project')
+	                      WHERE id = ?`, id, sessionID); err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(`UPDATE file_touches SET project_id = ? WHERE session_id = ?`, id, sessionID); err != nil {
+		return nil, err
+	}
+	return id, nil
 }
 
 func nullInt64ToAny(n sql.NullInt64) any {

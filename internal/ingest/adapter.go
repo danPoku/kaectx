@@ -57,6 +57,13 @@ type SessionUpdate struct {
 	Model        string
 	Title        string
 	Timestamp    string
+	// Sidechain marks a line from a subagent transcript that carries its
+	// parent's session id (Claude Code writes these under
+	// <session>/subagents/). Its cwd is wherever the subagent was sent, not
+	// where the session lives, so it may only set the project provisionally,
+	// like a branch filing a claim under a temporary reference until the
+	// policyholder's own form arrives.
+	Sidechain bool
 }
 
 // ParseResult is what an Adapter returns for one input line.

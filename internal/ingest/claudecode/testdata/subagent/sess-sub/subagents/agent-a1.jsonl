@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"List open issues in both repos"},"isSidechain":true,"agentId":"a1","sessionId":"sess-sub","cwd":"/home/dev/work","gitBranch":"HEAD","version":"2.1.296","timestamp":"2026-09-20T10:00:30.000Z"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-haiku-5","content":[{"type":"text","text":"Found 4 open issues."}]},"isSidechain":true,"agentId":"a1","sessionId":"sess-sub","cwd":"/home/dev/work","gitBranch":"HEAD","version":"2.1.296","timestamp":"2026-09-20T10:00:40.000Z"}

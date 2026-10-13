@@ -54,6 +54,10 @@ type line struct {
 	// skill's instructions, a usage-limit notice, an image placeholder):
 	// not something the person typed.
 	IsMeta bool `json:"isMeta"`
+	// IsSidechain is true on every line of a subagent transcript
+	// (<session>/subagents/agent-*.jsonl), which reuses the parent's
+	// sessionId.
+	IsSidechain bool `json:"isSidechain"`
 }
 
 type messageBlock struct {
@@ -113,6 +117,7 @@ func sessionUpdate(l line) ingest.SessionUpdate {
 		GitBranch: l.GitBranch,
 		Version:   l.Version,
 		Timestamp: l.Timestamp,
+		Sidechain: l.IsSidechain,
 	}
 }
 
