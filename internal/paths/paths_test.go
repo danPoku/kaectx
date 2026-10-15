@@ -38,6 +38,45 @@ func TestRelIfWithinAcrossPathStyles(t *testing.T) {
 	}
 }
 
+func TestKeyMatchesEverySpellingOfOneFolder(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"windows", `C:\Users\kojog\NIORA`, "c:/users/kojog/niora"},
+		{"lowercase drive", `c:\Users\kojog\NIORA`, "c:/users/kojog/niora"},
+		{"forward slashes", `C:/Users/kojog/NIORA/`, "c:/users/kojog/niora"},
+		{"wsl mount", "/mnt/c/Users/kojog/NIORA", "c:/users/kojog/niora"},
+		{"wsl mount upper", "/mnt/C/Users/kojog/NIORA", "c:/users/kojog/niora"},
+		{"drive root", `C:\`, "c:"},
+		{"wsl drive root", "/mnt/c", "c:"},
+		{"unc", `\\Server\Share\Repo`, "//server/share/repo"},
+		{"posix keeps case", "/home/Dev/repo", "/home/Dev/repo"},
+		{"not a mount", "/mnt/data/repo", "/mnt/data/repo"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := paths.Key(c.in); got != c.want {
+				t.Errorf("Key(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestWithin(t *testing.T) {
+	for _, c := range []struct {
+		k, root string
+		want    bool
+	}{
+		{"c:/repo", "c:/repo", true},
+		{"c:/repo/pkg", "c:/repo", true},
+		{"c:/repo-two", "c:/repo", false},
+		{"c:/repo", "c:", true},
+		{"/home/dev/repo", "/home/dev", true},
+	} {
+		if got := paths.Within(c.k, c.root); got != c.want {
+			t.Errorf("Within(%q, %q) = %v, want %v", c.k, c.root, got, c.want)
+		}
+	}
+}
+
 func TestCleanSlashPreservesRootKindsAndDot(t *testing.T) {
 	for input, want := range map[string]string{
 		`\\Server\Share\repo\a.go`: "//Server/Share/repo/a.go",

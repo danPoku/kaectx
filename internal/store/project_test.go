@@ -5,7 +5,9 @@ package store
 
 import (
 	"database/sql"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -135,6 +137,101 @@ func TestLookupProjectNeverRegistersProjectsOrPaths(t *testing.T) {
 	}
 	if projects != 1 || paths != 1 {
 		t.Errorf("lookup mutated catalogue: projects=%d paths=%d; want 1, 1", projects, paths)
+	}
+}
+
+// TestResolveProjectIsSpellingBlind covers the spellings one Windows folder
+// arrives in: drive-letter case and the WSL mount. Each must resolve to the
+// first spelling's project without adding a path row.
+func TestResolveProjectIsSpellingBlind(t *testing.T) {
+	db := migratedTestDB(t)
+	first, err := ResolveProject(db, `C:\x\repo`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, spelling := range []string{`c:\x\repo`, "/mnt/c/x/repo", `C:/X/Repo/pkg`} {
+		got, err := ResolveProject(db, spelling)
+		if err != nil {
+			t.Fatalf("ResolveProject(%q): %v", spelling, err)
+		}
+		if got != first {
+			t.Errorf("ResolveProject(%q) = %d, want %d", spelling, got, first)
+		}
+	}
+	var rows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM project_paths`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Errorf("project_paths has %d rows, want 1", rows)
+	}
+}
+
+// TestLookupProjectPicksLowerIDWhenSpellingsWereSplit: a catalogue built
+// before spelling-blind matching can hold one folder under two projects. Every
+// spelling must then agree on one of them, or the split continues.
+func TestLookupProjectPicksLowerIDWhenSpellingsWereSplit(t *testing.T) {
+	db := migratedTestDB(t)
+	var ids []int64
+	for _, p := range []string{"/mnt/c/Users/dev/NIORA", `C:\Users\dev\NIORA`} {
+		res, err := db.Exec(`INSERT INTO projects(name) VALUES ('NIORA')`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := res.LastInsertId()
+		if _, err := db.Exec(`INSERT INTO project_paths(path, project_id) VALUES (?, ?)`, p, id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	for _, spelling := range []string{"/mnt/c/Users/dev/NIORA", `C:\Users\dev\NIORA`, `c:\users\dev\niora\api`} {
+		got, ok, err := LookupProject(db, spelling)
+		if err != nil || !ok || got != ids[0] {
+			t.Errorf("LookupProject(%q) = %d, %v, %v; want %d, true, nil", spelling, got, ok, err, ids[0])
+		}
+	}
+}
+
+// TestResolveProjectMapsWorktreeToItsRepo reproduces the layout that misfiled
+// sessions: a worktree kept under a parent folder that is a project of its
+// own. The worktree, and a folder inside it, must resolve to the repo.
+func TestResolveProjectMapsWorktreeToItsRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	db := migratedTestDB(t)
+	parent := t.TempDir()
+	repo := filepath.Join(parent, "api")
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q", repo)
+	git("-C", repo, "commit", "-q", "--allow-empty", "-m", "init")
+	worktree := filepath.Join(parent, ".worktrees", "api-463")
+	git("-C", repo, "worktree", "add", "-q", "-b", "api-463", worktree)
+	if err := os.MkdirAll(filepath.Join(worktree, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	repoID, err := ResolveProject(db, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentID, err := ResolveProject(db, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentID == repoID {
+		t.Fatal("setup: parent folder resolved to the repo's project")
+	}
+	for _, dir := range []string{worktree, filepath.Join(worktree, "pkg")} {
+		if got, err := ResolveProject(db, dir); err != nil || got != repoID {
+			t.Errorf("ResolveProject(%s) = %d, %v; want the repo's project %d (parent folder is %d)", dir, got, err, repoID, parentID)
+		}
 	}
 }
 

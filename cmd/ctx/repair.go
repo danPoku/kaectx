@@ -94,7 +94,7 @@ func formatProjects(r repair.ProjectsResult, dryRun bool) string {
 	if dryRun {
 		verb = "would move"
 	}
-	out := fmt.Sprintf("examined %d Claude Code sessions from their first main-transcript line\n", r.Examined)
+	out := fmt.Sprintf("examined %d sessions by the folder they started in\n", r.Examined)
 	out += fmt.Sprintf("projects: %s %d sessions\n", verb, len(r.Moved))
 	for _, m := range r.Moved {
 		from := m.From
@@ -108,6 +108,9 @@ func formatProjects(r repair.ProjectsResult, dryRun bool) string {
 	}
 	if r.NoMain > 0 {
 		out += fmt.Sprintf("          %d sessions have only subagent lines stored; left as they were\n", r.NoMain)
+	}
+	if r.NoCWD > 0 {
+		out += fmt.Sprintf("          %d sessions logged no folder; left as they were\n", r.NoCWD)
 	}
 	if r.Unknown > 0 {
 		out += fmt.Sprintf("          %d sessions start in a folder no known project owns; left as they were\n", r.Unknown)

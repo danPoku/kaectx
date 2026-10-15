@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+
+	"github.com/danPoku/kaectx/internal/paths"
 )
 
 // ResolveProject finds or creates the project that owns cwd. Matching is by
@@ -24,8 +27,12 @@ import (
 // case — cwd is just added as another path to that existing project instead
 // of creating a duplicate. No remote (not a git repo, or a repo with none
 // configured) means the project is identified purely by path.
+//
+// Before any of that, a cwd inside a linked git worktree is mapped to its
+// main worktree (see mainWorktree), and paths are compared spelling-blind
+// (see lookupByPathPrefix).
 func ResolveProject(db DBTX, cwd string) (int64, error) {
-	cwd = filepath.Clean(cwd)
+	cwd = mainWorktree(filepath.Clean(cwd))
 
 	if id, ok, err := lookupByPathPrefix(db, cwd); err != nil {
 		return 0, err
@@ -76,7 +83,7 @@ type DBTX interface {
 // project or path. Read-only commands use it to avoid changing the catalogue
 // merely because they were invoked from a new checkout or unrelated folder.
 func LookupProject(db DBTX, cwd string) (int64, bool, error) {
-	cwd = filepath.Clean(cwd)
+	cwd = mainWorktree(filepath.Clean(cwd))
 	if id, ok, err := lookupByPathPrefix(db, cwd); err != nil || ok {
 		return id, ok, err
 	}
@@ -95,14 +102,24 @@ func LookupProject(db DBTX, cwd string) (int64, bool, error) {
 	return id, true, nil
 }
 
+// lookupByPathPrefix finds the project whose known path is the longest
+// prefix of cwd. Paths are compared by paths.Key, so C:\x, c:\x and /mnt/c/x
+// are one folder: an agent's logged spelling (drive-letter case, WSL vs.
+// Windows) must not decide which project a session lands in.
+//
+// Catalogues built before this rule can hold one folder under two projects.
+// When keys tie, the lower project id wins. The choice must not depend on
+// which spelling cwd used, or the three spellings would still split;
+// `ctx repair projects` then re-files the loser's sessions.
 func lookupByPathPrefix(db DBTX, cwd string) (int64, bool, error) {
-	rows, err := db.Query(`SELECT path, project_id FROM project_paths`)
+	rows, err := db.Query(`SELECT path, project_id FROM project_paths ORDER BY project_id`)
 	if err != nil {
 		return 0, false, err
 	}
 	defer rows.Close()
 
-	bestPath := ""
+	key := paths.Key(cwd)
+	bestKey, found := "", false
 	var bestID int64
 	for rows.Next() {
 		var p string
@@ -110,14 +127,53 @@ func lookupByPathPrefix(db DBTX, cwd string) (int64, bool, error) {
 		if err := rows.Scan(&p, &id); err != nil {
 			return 0, false, err
 		}
-		if (cwd == p || strings.HasPrefix(cwd, p+string(filepath.Separator))) && len(p) > len(bestPath) {
-			bestPath, bestID = p, id
+		// Strictly longer only: rows come in project id order, so on a tie
+		// the lower id, seen first, keeps the match.
+		if pk := paths.Key(p); paths.Within(key, pk) && (!found || len(pk) > len(bestKey)) {
+			bestKey, bestID, found = pk, id, true
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return 0, false, err
 	}
-	return bestID, bestPath != "", nil
+	return bestID, found, nil
+}
+
+// worktreeRoots caches mainWorktree's answer per directory for the life of
+// the process: ingest resolves the same few cwds for thousands of lines, and
+// each answer costs a git subprocess.
+var worktreeRoots sync.Map
+
+// mainWorktree maps a directory inside a linked git worktree to the same
+// place in the repository's main worktree, so a worktree's sessions belong
+// to its repo's project, not to whatever known folder happens to contain it
+// (worktrees often live under a parent folder that is a project of its own).
+// Anything else, including a directory that no longer exists or is not a
+// repo, comes back unchanged.
+func mainWorktree(dir string) string {
+	if v, ok := worktreeRoots.Load(dir); ok {
+		return v.(string)
+	}
+	resolved := dir
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--path-format=absolute",
+		"--git-dir", "--git-common-dir", "--show-toplevel").Output()
+	if err == nil {
+		if lines := strings.Split(strings.TrimSpace(string(out)), "\n"); len(lines) == 3 {
+			gitDir := filepath.Clean(strings.TrimSpace(lines[0]))
+			common := filepath.Clean(strings.TrimSpace(lines[1]))
+			top := filepath.Clean(strings.TrimSpace(lines[2]))
+			// A linked worktree has its own git dir under the common one
+			// (<repo>/.git/worktrees/<name>). A bare repo has no main
+			// worktree to map to, so only a common dir named .git counts.
+			if paths.Key(gitDir) != paths.Key(common) && filepath.Base(common) == ".git" {
+				if rel, err := filepath.Rel(top, dir); err == nil && !strings.HasPrefix(rel, "..") {
+					resolved = filepath.Join(filepath.Dir(common), rel)
+				}
+			}
+		}
+	}
+	worktreeRoots.Store(dir, resolved)
+	return resolved
 }
 
 // normalizedOriginRemote returns dir's `origin` remote normalized to

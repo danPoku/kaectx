@@ -13,8 +13,9 @@ import (
 // ProjectsResult counts what a Projects run found and changed. With DryRun
 // the counts describe what would have changed; nothing is written.
 type ProjectsResult struct {
-	Examined  int    // Claude Code sessions with a main-transcript line that carries a cwd
-	NoMain    int    // sessions whose stored lines all came from subagents; left as they were
+	Examined  int    // sessions with a cwd to judge by: a Claude Code main-transcript line, or another agent's logged cwd
+	NoMain    int    // Claude Code sessions whose stored lines all came from subagents; left as they were
+	NoCWD     int    // other agents' sessions with no logged cwd; left as they were
 	Unknown   int    // sessions whose first cwd no known project owns; left as they were
 	Restarted int    // sessions whose started_at moved earlier
 	Moved     []Move // sessions whose project changed, in session id order
@@ -37,6 +38,12 @@ type Move struct {
 // earliest line without isSidechain decides the project, and the earliest
 // message of any kind decides started_at. Like the other repairs it runs in
 // one transaction and is idempotent: a second run moves nothing.
+//
+// Every other agent's session is re-filed by its logged cwd. That catches
+// sessions filed before project lookup ignored path spelling and mapped git
+// worktrees to their repo: a Codex session in C:\x\.worktrees\api-1 used to
+// land in the C:\x project, and one folder spelled C:\x and /mnt/c/x could be
+// two projects.
 func Projects(db *sql.DB, dryRun bool) (ProjectsResult, error) {
 	var res ProjectsResult
 	tx, err := db.Begin()
@@ -46,17 +53,17 @@ func Projects(db *sql.DB, dryRun bool) (ProjectsResult, error) {
 	defer tx.Rollback()
 
 	type session struct {
-		id      string
-		project sql.NullInt64
+		id, agent, cwd string
+		project        sql.NullInt64
 	}
-	rows, err := tx.Query(`SELECT id, project_id FROM sessions WHERE agent = 'claude-code' ORDER BY id`)
+	rows, err := tx.Query(`SELECT id, agent, COALESCE(cwd, ''), project_id FROM sessions ORDER BY id`)
 	if err != nil {
 		return res, fmt.Errorf("list sessions: %w", err)
 	}
 	var sessions []session
 	for rows.Next() {
 		var s session
-		if err := rows.Scan(&s.id, &s.project); err != nil {
+		if err := rows.Scan(&s.id, &s.agent, &s.cwd, &s.project); err != nil {
 			rows.Close()
 			return res, err
 		}
@@ -68,40 +75,45 @@ func Projects(db *sql.DB, dryRun bool) (ProjectsResult, error) {
 	}
 
 	for _, s := range sessions {
-		// Messages with no timestamp sort last, not first: ORDER BY puts
-		// NULL ahead of every value.
-		var cwd string
-		err := tx.QueryRow(`SELECT json_extract(raw, '$.cwd') FROM messages
-		                    WHERE session_id = ? AND raw IS NOT NULL
-		                      AND COALESCE(json_extract(raw, '$.isSidechain'), 0) = 0
-		                      AND COALESCE(json_extract(raw, '$.cwd'), '') <> ''
-		                    ORDER BY created_at IS NULL, created_at, seq LIMIT 1`, s.id).Scan(&cwd)
-		if err == sql.ErrNoRows {
-			res.NoMain++
+		cwd := s.cwd
+		if s.agent == "claude-code" {
+			// Messages with no timestamp sort last, not first: ORDER BY puts
+			// NULL ahead of every value.
+			err := tx.QueryRow(`SELECT json_extract(raw, '$.cwd') FROM messages
+			                    WHERE session_id = ? AND raw IS NOT NULL
+			                      AND COALESCE(json_extract(raw, '$.isSidechain'), 0) = 0
+			                      AND COALESCE(json_extract(raw, '$.cwd'), '') <> ''
+			                    ORDER BY created_at IS NULL, created_at, seq LIMIT 1`, s.id).Scan(&cwd)
+			if err == sql.ErrNoRows {
+				res.NoMain++
+				continue
+			}
+			if err != nil {
+				return res, fmt.Errorf("first cwd of %s: %w", s.id, err)
+			}
+
+			// An empty started_at comes from a row created by a line with no
+			// timestamp (an ai-title read first); any real one beats it.
+			r, err := tx.Exec(`WITH first AS (SELECT MIN(NULLIF(created_at, '')) AS at FROM messages WHERE session_id = ?1)
+			                   UPDATE sessions SET started_at = (SELECT at FROM first)
+			                   WHERE id = ?1 AND (SELECT at FROM first) IS NOT NULL
+			                     AND (started_at = '' OR (SELECT at FROM first) < started_at)`, s.id)
+			if err != nil {
+				return res, fmt.Errorf("started_at of %s: %w", s.id, err)
+			}
+			if n, _ := r.RowsAffected(); n > 0 {
+				res.Restarted++
+			}
+		} else if cwd == "" {
+			res.NoCWD++
 			continue
-		}
-		if err != nil {
-			return res, fmt.Errorf("first cwd of %s: %w", s.id, err)
 		}
 		res.Examined++
 
-		// An empty started_at comes from a row created by a line with no
-		// timestamp (an ai-title read first); any real one beats it.
-		r, err := tx.Exec(`WITH first AS (SELECT MIN(NULLIF(created_at, '')) AS at FROM messages WHERE session_id = ?1)
-		                   UPDATE sessions SET started_at = (SELECT at FROM first)
-		                   WHERE id = ?1 AND (SELECT at FROM first) IS NOT NULL
-		                     AND (started_at = '' OR (SELECT at FROM first) < started_at)`, s.id)
-		if err != nil {
-			return res, fmt.Errorf("started_at of %s: %w", s.id, err)
-		}
-		if n, _ := r.RowsAffected(); n > 0 {
-			res.Restarted++
-		}
-
-		// Look up, never create: a cwd no known project owns (say a WSL
-		// /mnt/c path read on Windows, where it cleans to \mnt\c) says
-		// nothing about where the session belongs, and a repair that
-		// minted projects would split the catalogue it is meant to fix.
+		// Look up, never create: a cwd no known project owns (say a Linux
+		// /home path read on Windows) says nothing about where the session
+		// belongs, and a repair that minted projects would split the
+		// catalogue it is meant to fix.
 		id, ok, err := store.LookupProject(tx, cwd)
 		if err != nil {
 			return res, fmt.Errorf("look up project of %s: %w", s.id, err)

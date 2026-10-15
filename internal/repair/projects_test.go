@@ -85,7 +85,7 @@ func misfiledDB(t *testing.T) projectsFixture {
 	session("claude-code:elsewhere", "claude-code", f.parent, "2026-09-20T08:30:00Z")
 	message("claude-code:elsewhere", "/other/place", "2026-09-20T08:30:00Z", false)
 
-	// Codex has no subagent transcripts; its sessions are out of scope.
+	// A Codex session that logged no cwd: nothing to judge it by.
 	session("codex:other", "codex", f.parent, "2026-09-20T07:00:00Z")
 	message("codex:other", "/work/repo", "2026-09-20T07:00:00Z", false)
 	return f
@@ -106,8 +106,8 @@ func TestProjectsRefilesSessionsByMainTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Projects: %v", err)
 	}
-	if res.Examined != 4 || res.NoMain != 1 || res.Unknown != 1 || res.Restarted != 2 {
-		t.Errorf("result = %+v, want Examined 4, NoMain 1, Unknown 1, Restarted 2", res)
+	if res.Examined != 4 || res.NoMain != 1 || res.NoCWD != 1 || res.Unknown != 1 || res.Restarted != 2 {
+		t.Errorf("result = %+v, want Examined 4, NoMain 1, NoCWD 1, Unknown 1, Restarted 2", res)
 	}
 	var projects int
 	if err := f.db.QueryRow(`SELECT COUNT(*) FROM projects`).Scan(&projects); err != nil {
@@ -167,6 +167,59 @@ func TestProjectsRefilesSessionsByMainTranscript(t *testing.T) {
 	}
 	if len(again.Moved) != 0 || again.Restarted != 0 {
 		t.Errorf("second run = %+v, want nothing moved or restarted", again)
+	}
+}
+
+// TestProjectsMergesSpellingsOfOneFolder: before lookup ignored path
+// spelling, one Windows folder could become two projects (C:\proj from a
+// Windows agent, /mnt/c/proj from a WSL one). Lookup now resolves both to the
+// lower id, and the repair moves the other project's sessions there, for
+// Codex by its logged cwd and for Claude Code by its main transcript.
+func TestProjectsMergesSpellingsOfOneFolder(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "ctx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for _, p := range []string{`C:\proj`, "/mnt/c/proj"} {
+		res, err := db.Exec(`INSERT INTO projects(name) VALUES ('proj')`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := res.LastInsertId()
+		exec1(t, db, `INSERT INTO project_paths(path, project_id) VALUES (?, ?)`, p, id)
+		ids = append(ids, id)
+	}
+	kept, split := ids[0], ids[1]
+	exec1(t, db, `INSERT INTO sessions(id, agent, native_id, project_id, cwd, started_at)
+	              VALUES ('codex:wsl', 'codex', 'wsl', ?, '/mnt/c/proj/api', '2026-09-20T07:00:00Z')`, split)
+	exec1(t, db, `INSERT INTO sessions(id, agent, native_id, project_id, started_at)
+	              VALUES ('claude-code:wsl', 'claude-code', 'wsl', ?, '2026-09-20T08:00:00Z')`, split)
+	exec1(t, db, `INSERT INTO messages(session_id, seq, role, content, created_at, raw)
+	              VALUES ('claude-code:wsl', 0, 'user', 'x', '2026-09-20T08:00:00Z', '{"cwd":"/mnt/c/proj","isSidechain":false}')`)
+
+	res, err := Projects(db, false)
+	if err != nil {
+		t.Fatalf("Projects: %v", err)
+	}
+	if len(res.Moved) != 2 {
+		t.Errorf("Moved = %+v, want both sessions", res.Moved)
+	}
+	for _, id := range []string{"codex:wsl", "claude-code:wsl"} {
+		var project int64
+		if err := db.QueryRow(`SELECT project_id FROM sessions WHERE id = ?`, id).Scan(&project); err != nil {
+			t.Fatal(err)
+		}
+		if project != kept {
+			t.Errorf("%s in project %d, want %d", id, project, kept)
+		}
+	}
+	if again, err := Projects(db, false); err != nil || len(again.Moved) != 0 {
+		t.Errorf("second run = %+v, %v; want nothing moved", again, err)
 	}
 }
 

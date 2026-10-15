@@ -879,9 +879,9 @@ func TestGetChunk(t *testing.T) {
 			t.Fatalf("seed chunk: %v", err)
 		}
 		id, _ := res.LastInsertId()
-		call, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "get_chunk", Arguments: map[string]any{"chunk_id": id}})
-		if err == nil && !call.IsError {
-			t.Errorf("get_chunk read a chunk from another project: %+v", call.Content)
+		msg := toolError(t, cs, "get_chunk", map[string]any{"chunk_id": id})
+		if !strings.Contains(msg, "belongs to another project, proj") || strings.Contains(msg, "secret") {
+			t.Errorf("get_chunk error = %q, want it to name the other project and nothing else", msg)
 		}
 	})
 
@@ -999,14 +999,43 @@ func TestGetSessionIsProjectScoped(t *testing.T) {
 			('codex:elsewhere', 1, 'assistant', 'text', 'reply');`, other); err != nil {
 		t.Fatal(err)
 	}
+	// Another project's session is an error that names the project, so an
+	// agent can't mistake it for an empty session; its content stays hidden.
+	msg := toolError(t, cs, "get_session", map[string]any{"session_id": "codex:elsewhere"})
+	if !strings.Contains(msg, "belongs to another project, proj") || strings.Contains(msg, "secret") {
+		t.Errorf("get_session error = %q, want it to name the other project and nothing else", msg)
+	}
+	// An unknown id is still plain not-found.
+	if msg := toolError(t, cs, "get_session", map[string]any{"session_id": "codex:nowhere"}); !strings.Contains(msg, "no session codex:nowhere") {
+		t.Errorf("unknown session error = %q, want not-found", msg)
+	}
+	// A real session of this project read past its end is empty, not an error.
 	var got struct {
-		Messages    []json.RawMessage `json:"messages"`
-		NextFromSeq *int              `json:"next_from_seq"`
+		Messages []json.RawMessage `json:"messages"`
 	}
-	callTool(t, cs, "get_session", map[string]any{"session_id": "codex:elsewhere"}, &got)
-	if len(got.Messages) != 0 || got.NextFromSeq != nil {
-		t.Errorf("another project's session returned %d messages (next %v), want none", len(got.Messages), got.NextFromSeq)
+	callTool(t, cs, "get_session", map[string]any{"session_id": "claude-code:sess-1", "from_seq": 100000}, &got)
+	if len(got.Messages) != 0 {
+		t.Errorf("range past the end returned %d messages, want none", len(got.Messages))
 	}
+}
+
+// toolError calls name with args, requires a tool error, and returns its text.
+func toolError(t *testing.T, cs *sdkmcp.ClientSession, name string, args map[string]any) string {
+	t.Helper()
+	res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		return err.Error()
+	}
+	if !res.IsError {
+		t.Fatalf("CallTool(%s) succeeded, want a tool error", name)
+	}
+	var text []string
+	for _, c := range res.Content {
+		if tc, ok := c.(*sdkmcp.TextContent); ok {
+			text = append(text, tc.Text)
+		}
+	}
+	return strings.Join(text, " ")
 }
 
 func TestGetSessionDefaultsToConversationText(t *testing.T) {
