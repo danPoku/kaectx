@@ -200,7 +200,12 @@ func TestResolveProjectMapsWorktreeToItsRepo(t *testing.T) {
 		t.Skip("git not available")
 	}
 	db := migratedTestDB(t)
-	parent := t.TempDir()
+	// Real path: git reports resolved paths, and on macOS t.TempDir sits
+	// under the /var -> /private/var symlink.
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	repo := filepath.Join(parent, "api")
 	git := func(args ...string) {
 		t.Helper()
@@ -228,7 +233,16 @@ func TestResolveProjectMapsWorktreeToItsRepo(t *testing.T) {
 	if parentID == repoID {
 		t.Fatal("setup: parent folder resolved to the repo's project")
 	}
-	for _, dir := range []string{worktree, filepath.Join(worktree, "pkg")} {
+	dirs := []string{worktree, filepath.Join(worktree, "pkg")}
+	// The same worktree folder reached through a symlink: git resolves it,
+	// the logged cwd does not, and the mapping must not depend on which.
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(parent, link); err == nil {
+		dirs = append(dirs, filepath.Join(link, ".worktrees", "api-463", "pkg"))
+	} else {
+		t.Logf("symlink case skipped: %v", err)
+	}
+	for _, dir := range dirs {
 		if got, err := ResolveProject(db, dir); err != nil || got != repoID {
 			t.Errorf("ResolveProject(%s) = %d, %v; want the repo's project %d (parent folder is %d)", dir, got, err, repoID, parentID)
 		}

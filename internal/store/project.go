@@ -155,20 +155,24 @@ func mainWorktree(dir string) string {
 		return v.(string)
 	}
 	resolved := dir
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--path-format=absolute",
-		"--git-dir", "--git-common-dir", "--show-toplevel").Output()
+	// --show-prefix is dir's place inside its worktree, as git sees it. It is
+	// asked for rather than computed from --show-toplevel, because git
+	// resolves symlinks in absolute paths and dir may be a symlinked
+	// spelling (/var vs /private/var on macOS, a symlinked home on Linux):
+	// a Rel between the two would climb out with "..". It comes first, before
+	// --path-format=absolute, and is an empty line at the worktree's top.
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-prefix",
+		"--path-format=absolute", "--git-dir", "--git-common-dir").Output()
 	if err == nil {
-		if lines := strings.Split(strings.TrimSpace(string(out)), "\n"); len(lines) == 3 {
-			gitDir := filepath.Clean(strings.TrimSpace(lines[0]))
-			common := filepath.Clean(strings.TrimSpace(lines[1]))
-			top := filepath.Clean(strings.TrimSpace(lines[2]))
+		if lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n"); len(lines) == 3 {
+			prefix := strings.TrimSpace(lines[0])
+			gitDir := filepath.Clean(strings.TrimSpace(lines[1]))
+			common := filepath.Clean(strings.TrimSpace(lines[2]))
 			// A linked worktree has its own git dir under the common one
 			// (<repo>/.git/worktrees/<name>). A bare repo has no main
 			// worktree to map to, so only a common dir named .git counts.
 			if paths.Key(gitDir) != paths.Key(common) && filepath.Base(common) == ".git" {
-				if rel, err := filepath.Rel(top, dir); err == nil && !strings.HasPrefix(rel, "..") {
-					resolved = filepath.Join(filepath.Dir(common), rel)
-				}
+				resolved = filepath.Join(filepath.Dir(common), filepath.FromSlash(prefix))
 			}
 		}
 	}
