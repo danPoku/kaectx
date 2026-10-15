@@ -218,8 +218,10 @@ func TestResolveProjectMapsWorktreeToItsRepo(t *testing.T) {
 	git("-C", repo, "commit", "-q", "--allow-empty", "-m", "init")
 	worktree := filepath.Join(parent, ".worktrees", "api-463")
 	git("-C", repo, "worktree", "add", "-q", "-b", "api-463", worktree)
-	if err := os.MkdirAll(filepath.Join(worktree, "pkg"), 0o755); err != nil {
-		t.Fatal(err)
+	for _, sub := range []string{"pkg", " spaced"} {
+		if err := os.MkdirAll(filepath.Join(worktree, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	repoID, err := ResolveProject(db, repo)
@@ -234,6 +236,20 @@ func TestResolveProjectMapsWorktreeToItsRepo(t *testing.T) {
 		t.Fatal("setup: parent folder resolved to the repo's project")
 	}
 	dirs := []string{worktree, filepath.Join(worktree, "pkg")}
+	// A folder whose name starts with a space is a real, different folder.
+	// Register its main-worktree twin as its own project: the worktree
+	// copy must resolve there, which it can't if the space is trimmed.
+	res, err := db.Exec(`INSERT INTO projects(name) VALUES (' spaced')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spacedID, _ := res.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO project_paths(path, project_id) VALUES (?, ?)`, filepath.Join(repo, " spaced"), spacedID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ResolveProject(db, filepath.Join(worktree, " spaced")); err != nil || got != spacedID {
+		t.Errorf("ResolveProject(worktree/\" spaced\") = %d, %v; want %d", got, err, spacedID)
+	}
 	// The same worktree folder reached through a symlink: git resolves it,
 	// the logged cwd does not, and the mapping must not depend on which.
 	link := filepath.Join(t.TempDir(), "link")

@@ -164,10 +164,12 @@ func mainWorktree(dir string) string {
 	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-prefix",
 		"--path-format=absolute", "--git-dir", "--git-common-dir").Output()
 	if err == nil {
-		if lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n"); len(lines) == 3 {
-			prefix := strings.TrimSpace(lines[0])
-			gitDir := filepath.Clean(strings.TrimSpace(lines[1]))
-			common := filepath.Clean(strings.TrimSpace(lines[2]))
+		// Strip line endings only: a folder name may begin or end with a
+		// space, and trimming it would name a different folder.
+		if lines := strings.Split(strings.TrimSuffix(strings.TrimSuffix(string(out), "\n"), "\r"), "\n"); len(lines) == 3 {
+			prefix := strings.TrimSuffix(lines[0], "\r")
+			gitDir := filepath.Clean(strings.TrimSuffix(lines[1], "\r"))
+			common := filepath.Clean(strings.TrimSuffix(lines[2], "\r"))
 			// A linked worktree has its own git dir under the common one
 			// (<repo>/.git/worktrees/<name>). A bare repo has no main
 			// worktree to map to, so only a common dir named .git counts.
