@@ -304,6 +304,7 @@ a new chat.
 | `save_note` | Records a decision, gotcha, convention, todo, or fact. |
 | `search_notes` | Searches saved notes. |
 | `record_retrieval_outcome` | Labels retrieved evidence as helpful, unhelpful, stale, incorrect or superseded. Pass the exact search run ID and rank returned by `search_context` or `get_chunk`. |
+| `record_search_outcome` | Records whether a search as a whole answered the question (helpful, partial or unhelpful) and, when it fell short, why (`wrong_project`, `not_indexed`, `stale_state`, `ranking`). Pass the search's run ID. Never changes a result's reliability; a second call for the same search replaces the first. |
 | `checkpoint_status` | Assesses the latest session's message count, elapsed span and file breadth. When a threshold is reached, the agent is instructed to offer a durable handoff and a fresh session; ctx never switches or ends the session automatically. Pass `session_id` to assess a specific session. `pending_feedback` lists up to 10 opened results still waiting for an outcome. |
 | `feedback_status` | Returns a bounded inbox of checkpoint decisions and opened retrievals that still need an explicit outcome. It identifies missing feedback; it does not guess whether context was helpful. |
 | `record_checkpoint_outcome` | Records whether the user started a new session, saved a handoff, continued, or dismissed a checkpoint recommendation. |
@@ -330,6 +331,14 @@ that gap the guess can name the wrong search, so inferred opens are counted
 separately (`inferred_open_count`), `feedback_status` asks about them at medium
 rather than high confidence, and `ctx doctor` shows exact and inferred opens
 apart.
+
+A result's label judges only what that result contained. A search can return
+only correct results and still miss what the agent needed, so the verdict on
+the search as a whole is recorded separately with `record_search_outcome`:
+`helpful`, `partial` or `unhelpful`, and for the last two a reason:
+`wrong_project`, `not_indexed`, `stale_state` or `ranking`. These verdicts never
+change any result's reliability. `ctx doctor` counts the last seven days' by
+outcome and reason, to show which retrieval gap comes up most.
 
 ### Checkpoint signals
 
@@ -396,7 +405,7 @@ first_seq and last_seq rather than paging from the start.
 | `ctx project list` | Show projects, their remotes, session counts and known paths. |
 | `ctx project merge <from> <into>` | Fold one project into another. |
 | `ctx audit-secrets` | Re-scan stored text with the current redaction rules and report rows and rule names (never the matched text). Exits non-zero on findings. Changes nothing. |
-| `ctx doctor` | Report the current project's sessions, embedding backlog, retrievals and outcomes, plus database-wide source, ingest-error and unassigned-chunk counts. |
+| `ctx doctor` | Report the current project's sessions, embedding backlog, retrievals, outcomes and search outcomes, plus database-wide source, ingest-error and unassigned-chunk counts. |
 | `ctx mcp` | Serve MCP over stdio. Catches up on unread session logs in the background. |
 | `ctx daemon` | Ingest and embed continuously. |
 

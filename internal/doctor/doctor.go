@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/danPoku/kaectx/internal/feedback"
 	"github.com/danPoku/kaectx/internal/governance"
 )
 
@@ -33,6 +34,11 @@ type Report struct {
 	RetrievedEvidence    int
 	ObservedEvidence     int
 	CredibleEvidence     int
+	// SearchOutcomes and SearchReasons count verdicts on whole searches
+	// recorded in the last seven days, keyed by feedback.SearchOutcomes and
+	// feedback.SearchReasons.
+	SearchOutcomes map[string]int
+	SearchReasons  map[string]int
 }
 
 func (r Report) OutcomeCoverage() float64 {
@@ -120,5 +126,42 @@ func Collect(ctx context.Context, db *sql.DB, projectID int64) (Report, error) {
 		projectID, projectID, projectID, governance.MinCredibleObservations).Scan(&r.Outcomes, &r.RetrievedEvidence, &r.ObservedEvidence, &r.CredibleEvidence); err != nil {
 		return r, fmt.Errorf("read outcome coverage: %w", err)
 	}
+	if err := collectSearchOutcomes(ctx, db, projectID, &r); err != nil {
+		return r, fmt.Errorf("read search outcomes: %w", err)
+	}
 	return r, nil
+}
+
+// collectSearchOutcomes counts the last seven days' verdicts on whole
+// searches by outcome and by reason. Every known key starts at zero so the
+// report always shows the full set, including gaps nobody has hit.
+func collectSearchOutcomes(ctx context.Context, db *sql.DB, projectID int64, r *Report) error {
+	r.SearchOutcomes = map[string]int{}
+	for _, o := range feedback.SearchOutcomes {
+		r.SearchOutcomes[o] = 0
+	}
+	r.SearchReasons = map[string]int{}
+	for _, reason := range feedback.SearchReasons {
+		r.SearchReasons[reason] = 0
+	}
+	rows, err := db.QueryContext(ctx, `SELECT outcome, COALESCE(reason,''), COUNT(*)
+		FROM retrieval_run_observations
+		WHERE project_id=? AND created_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')
+		GROUP BY outcome, reason`, projectID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var outcome, reason string
+		var n int
+		if err := rows.Scan(&outcome, &reason, &n); err != nil {
+			return err
+		}
+		r.SearchOutcomes[outcome] += n
+		if reason != "" {
+			r.SearchReasons[reason] += n
+		}
+	}
+	return rows.Err()
 }

@@ -6,6 +6,7 @@ package doctor_test
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/danPoku/kaectx/internal/doctor"
@@ -94,6 +95,45 @@ func TestCollectReportsCorpusAndRetrievalHealth(t *testing.T) {
 	}
 	if r.RecentOpenedResults != 2 || r.RecentInferredOpens != 1 || r.RecentLabelledOpens != 2 {
 		t.Errorf("feedback funnel = %+v", r)
+	}
+}
+
+// TestCollectCountsSearchOutcomes checks the last seven days' verdicts on
+// whole searches are counted by outcome and by reason, older ones are left
+// out, and every known key is present even at zero.
+func TestCollectCountsSearchOutcomes(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "ctx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.Exec(`INSERT INTO projects(name) VALUES ('p')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := res.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO retrieval_run_observations(project_id,outcome,reason,created_at) VALUES
+		(?,'helpful',NULL,strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		(?,'partial','wrong_project',strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		(?,'unhelpful','wrong_project',strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		(?,'partial','ranking',strftime('%Y-%m-%dT%H:%M:%fZ','now','-8 days'))`,
+		projectID, projectID, projectID, projectID); err != nil {
+		t.Fatal(err)
+	}
+	r, err := doctor.Collect(context.Background(), db, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOutcomes := map[string]int{"helpful": 1, "partial": 1, "unhelpful": 1}
+	wantReasons := map[string]int{"wrong_project": 2, "not_indexed": 0, "stale_state": 0, "ranking": 0}
+	if !reflect.DeepEqual(r.SearchOutcomes, wantOutcomes) {
+		t.Errorf("SearchOutcomes = %v, want %v", r.SearchOutcomes, wantOutcomes)
+	}
+	if !reflect.DeepEqual(r.SearchReasons, wantReasons) {
+		t.Errorf("SearchReasons = %v, want %v", r.SearchReasons, wantReasons)
 	}
 }
 
