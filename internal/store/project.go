@@ -24,7 +24,7 @@ import (
 // case — cwd is just added as another path to that existing project instead
 // of creating a duplicate. No remote (not a git repo, or a repo with none
 // configured) means the project is identified purely by path.
-func ResolveProject(db *sql.DB, cwd string) (int64, error) {
+func ResolveProject(db DBTX, cwd string) (int64, error) {
 	cwd = filepath.Clean(cwd)
 
 	if id, ok, err := lookupByPathPrefix(db, cwd); err != nil {
@@ -63,10 +63,19 @@ func ResolveProject(db *sql.DB, cwd string) (int64, error) {
 	return id, nil
 }
 
+// DBTX is what project resolution needs from a connection: satisfied by both
+// *sql.DB (ingest, commands) and *sql.Tx (repair, which resolves projects
+// inside one transaction so an interrupted repair changes nothing).
+type DBTX interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // LookupProject finds the project that owns cwd without registering a new
 // project or path. Read-only commands use it to avoid changing the catalogue
 // merely because they were invoked from a new checkout or unrelated folder.
-func LookupProject(db *sql.DB, cwd string) (int64, bool, error) {
+func LookupProject(db DBTX, cwd string) (int64, bool, error) {
 	cwd = filepath.Clean(cwd)
 	if id, ok, err := lookupByPathPrefix(db, cwd); err != nil || ok {
 		return id, ok, err
@@ -86,7 +95,7 @@ func LookupProject(db *sql.DB, cwd string) (int64, bool, error) {
 	return id, true, nil
 }
 
-func lookupByPathPrefix(db *sql.DB, cwd string) (int64, bool, error) {
+func lookupByPathPrefix(db DBTX, cwd string) (int64, bool, error) {
 	rows, err := db.Query(`SELECT path, project_id FROM project_paths`)
 	if err != nil {
 		return 0, false, err

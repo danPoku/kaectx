@@ -105,6 +105,7 @@ commands:
   repair git [--dry-run]              re-derive git commit spans and repo-root file paths for sessions ingested by older versions
   repair touches [--dry-run]          backfill file records for Codex apply_patch calls ingested before ctx read them
   repair messages [--dry-run]         reclassify harness-injected user messages and rebuild affected chunks
+  repair projects [--dry-run]         re-file Claude Code sessions under the project their main transcript starts in
   project list | merge <from> <into>  list projects, or fold a duplicate (e.g. from a deleted checkout) into another
   audit-secrets                       re-scan stored text with the redaction rules and report residual secrets
   doctor                              report ingestion, embedding, retrieval, and outcome health

@@ -184,8 +184,9 @@ that whole day, dates are UTC). Equally good matches are listed newest first.
 If some session logs haven't been ingested yet, it says so on stderr.
 
 After upgrading from an older version, run these once (add `--dry-run` to see
-what they would do first). Both read only what is already in the database, are
-safe to repeat, and run in a single transaction:
+what they would do first). Each is safe to repeat and runs in a single
+transaction. `messages` and `projects` read only what is already in the
+database; `touches` and `git` also read the sessions' git repositories:
 
 - `ctx repair touches` rebuilds file records for Codex `apply_patch` calls
   ingested before ctx could read them, from the patch text already stored.
@@ -200,6 +201,13 @@ safe to repeat, and run in a single transaction:
   timestamps and rewrites older working-directory-relative file paths to be
   repo-root-relative. Rows whose directory no longer exists are retried on the
   next run.
+- `ctx repair projects` re-files Claude Code sessions under the project their
+  main transcript starts in. Older versions let a subagent transcript, which
+  reuses its parent's session id, choose the project, so a session could land
+  in a parent folder's project and vanish from its repo's search. It also sets
+  each session's start to its earliest message, lists every session it moves,
+  and never creates a project: a session whose first folder no known project
+  owns is left as it is.
 
 `ctx explain <path>` is also project-scoped. The path is project-relative, such
 as `internal/store/store.go`.
@@ -392,7 +400,7 @@ first_seq and last_seq rather than paging from the start.
 | `ctx search <query> [--agent A] [--limit N] [--since D] [--until D] [--risk-aware]` | Search the current project. `--risk-aware` reranks using recorded retrieval outcomes. Output starts with the search's run ID and numbers each hit. |
 | `ctx feedback <run_id> <rank> <outcome> [--note TEXT]` | Label a `ctx search` hit as helpful, unhelpful, stale, incorrect or superseded, the CLI counterpart of `record_retrieval_outcome`. A second label for the same hit replaces the first. |
 | `ctx explain <path> [--limit N]` | Show sessions, actions and git span for a project-relative file. |
-| `ctx repair git\|touches\|messages [--dry-run]` | Bring data ingested by older versions up to date (see [Quick start](#quick-start)). |
+| `ctx repair git\|touches\|messages\|projects [--dry-run]` | Bring data ingested by older versions up to date (see [Quick start](#quick-start)). |
 | `ctx project list` | Show projects, their remotes, session counts and known paths. |
 | `ctx project merge <from> <into>` | Fold one project into another. |
 | `ctx audit-secrets` | Re-scan stored text with the current redaction rules and report rows and rule names (never the matched text). Exits non-zero on findings. Changes nothing. |

@@ -1,0 +1,5 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-09-20T10:00:00.000Z","sessionId":"sess-sub"}
+{"type":"user","message":{"role":"user","content":"Triage the backend issues"},"isSidechain":false,"sessionId":"sess-sub","cwd":"/home/dev/work/repo","gitBranch":"main","version":"2.1.296","timestamp":"2026-09-20T10:00:00.100Z"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"I'll look across both repos."}]},"isSidechain":false,"sessionId":"sess-sub","cwd":"/home/dev/work/repo","gitBranch":"main","version":"2.1.296","timestamp":"2026-09-20T10:00:05.000Z"}
+{"type":"user","message":{"role":"user","content":"Check the frontend too"},"isSidechain":false,"sessionId":"sess-sub","cwd":"/home/dev/work","gitBranch":"HEAD","version":"2.1.296","timestamp":"2026-09-20T10:01:00.000Z"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"The frontend reduces quantities only on request changes."}]},"isSidechain":false,"sessionId":"sess-sub","cwd":"/home/dev/work","gitBranch":"HEAD","version":"2.1.296","timestamp":"2026-09-20T10:01:05.000Z"}

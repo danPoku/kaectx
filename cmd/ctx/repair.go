@@ -11,10 +11,10 @@ import (
 	"github.com/danPoku/kaectx/internal/store"
 )
 
-const repairUsage = "usage: ctx repair git|touches|messages [--dry-run]"
+const repairUsage = "usage: ctx repair git|touches|messages|projects [--dry-run]"
 
 func runRepair(args []string) error {
-	if len(args) == 0 || (args[0] != "git" && args[0] != "touches" && args[0] != "messages") {
+	if len(args) == 0 || (args[0] != "git" && args[0] != "touches" && args[0] != "messages" && args[0] != "projects") {
 		return fmt.Errorf(repairUsage)
 	}
 	kind := args[0]
@@ -33,6 +33,14 @@ func runRepair(args []string) error {
 	}
 	defer db.Close()
 
+	if kind == "projects" {
+		res, err := repair.Projects(db, *dryRun)
+		if err != nil {
+			return err
+		}
+		fmt.Print(formatProjects(res, *dryRun))
+		return nil
+	}
 	if kind == "messages" {
 		res, err := repair.Messages(db, *dryRun)
 		if err != nil {
@@ -75,6 +83,35 @@ func formatMessages(r repair.MessagesResult, dryRun bool) string {
 	}
 	out += fmt.Sprintf("chunks:   rebuilt for %d sessions; new chunks are embedded by `ctx daemon` or `ctx embed`\n", r.Sessions)
 	out += fmt.Sprintf("titles:   %s %d\n", verb, r.Titled)
+	if dryRun {
+		out += "dry run: nothing was written\n"
+	}
+	return out
+}
+
+func formatProjects(r repair.ProjectsResult, dryRun bool) string {
+	verb := "moved"
+	if dryRun {
+		verb = "would move"
+	}
+	out := fmt.Sprintf("examined %d Claude Code sessions from their first main-transcript line\n", r.Examined)
+	out += fmt.Sprintf("projects: %s %d sessions\n", verb, len(r.Moved))
+	for _, m := range r.Moved {
+		from := m.From
+		if from == "" {
+			from = "no project"
+		}
+		out += fmt.Sprintf("          %s: %s -> %s\n", m.SessionID, from, m.To)
+	}
+	if r.Restarted > 0 {
+		out += fmt.Sprintf("started:  %d sessions now start at their earliest message\n", r.Restarted)
+	}
+	if r.NoMain > 0 {
+		out += fmt.Sprintf("          %d sessions have only subagent lines stored; left as they were\n", r.NoMain)
+	}
+	if r.Unknown > 0 {
+		out += fmt.Sprintf("          %d sessions start in a folder no known project owns; left as they were\n", r.Unknown)
+	}
 	if dryRun {
 		out += "dry run: nothing was written\n"
 	}

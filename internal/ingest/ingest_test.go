@@ -495,3 +495,156 @@ func TestRunChunksFinalTurnFollowedByBookkeepingEvent(t *testing.T) {
 		})
 	}
 }
+
+// A Claude Code subagent transcript (<session>/subagents/agent-*.jsonl)
+// reuses its parent's sessionId, and the subagent is often sent to a parent
+// folder that is a project of its own. Whichever file is read first, the
+// session must end up in the project its main transcript starts in, with
+// that transcript's first timestamp, and stay there when the cwd drifts.
+func TestRunSubagentTranscriptDoesNotSetSessionProject(t *testing.T) {
+	const (
+		repoDir   = "/home/dev/work/repo"
+		parentDir = "/home/dev/work"
+		sessionID = "claude-code:sess-sub"
+		started   = "2026-09-20T10:00:00.100Z"
+	)
+	main, err := os.ReadFile("claudecode/testdata/subagent/sess-sub.jsonl")
+	if err != nil {
+		t.Fatalf("read main fixture: %v", err)
+	}
+	sub, err := os.ReadFile("claudecode/testdata/subagent/sess-sub/subagents/agent-a1.jsonl")
+	if err != nil {
+		t.Fatalf("read subagent fixture: %v", err)
+	}
+	mainLines := strings.SplitAfter(string(main), "\n")
+
+	// layout writes the fixture tree into root as Claude Code lays it out,
+	// with the main transcript cut after its first n lines.
+	layout := func(t *testing.T, root string, n int) (mainPath, subPath string) {
+		t.Helper()
+		mainPath = filepath.Join(root, "sess-sub.jsonl")
+		subPath = filepath.Join(root, "sess-sub", "subagents", "agent-a1.jsonl")
+		if err := os.MkdirAll(filepath.Dir(subPath), 0755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(subPath, sub, 0644); err != nil {
+			t.Fatalf("write subagent: %v", err)
+		}
+		if err := os.WriteFile(mainPath, []byte(strings.Join(mainLines[:n], "")), 0644); err != nil {
+			t.Fatalf("write main: %v", err)
+		}
+		return mainPath, subPath
+	}
+
+	tests := []struct {
+		name   string
+		ingest func(t *testing.T, db *sql.DB, root string)
+	}{
+		{
+			// WalkDir visits the "sess-sub/" directory before
+			// "sess-sub.jsonl", so the subagent creates the row.
+			name: "one walk of the whole tree",
+			ingest: func(t *testing.T, db *sql.DB, root string) {
+				layout(t, root, len(mainLines))
+				if _, err := ingest.RunAll(db, func() ingest.Adapter { return claudecode.New() }, root); err != nil {
+					t.Fatalf("RunAll: %v", err)
+				}
+			},
+		},
+		{
+			// The subagent is read alone, then the main transcript grows
+			// across passes, ending in the parent folder.
+			name: "subagent first, then incremental passes",
+			ingest: func(t *testing.T, db *sql.DB, root string) {
+				mainPath, subPath := layout(t, root, 0)
+				if err := ingest.Run(db, claudecode.New(), subPath); err != nil {
+					t.Fatalf("Run subagent: %v", err)
+				}
+				for n := 2; n <= len(mainLines); n++ {
+					if err := os.WriteFile(mainPath, []byte(strings.Join(mainLines[:n], "")), 0644); err != nil {
+						t.Fatalf("grow main: %v", err)
+					}
+					if err := ingest.Run(db, claudecode.New(), mainPath); err != nil {
+						t.Fatalf("Run main, %d lines: %v", n, err)
+					}
+				}
+				if err := ingest.Run(db, claudecode.New(), subPath); err != nil {
+					t.Fatalf("re-Run subagent: %v", err)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openTestDB(t)
+			// Both folders are already projects of their own, because
+			// earlier sessions started in each. The repo is registered
+			// directly: with no git remote here, resolving it would find
+			// the parent by path prefix.
+			parentID, err := store.ResolveProject(db, parentDir)
+			if err != nil {
+				t.Fatalf("ResolveProject(parent): %v", err)
+			}
+			res, err := db.Exec(`INSERT INTO projects(name) VALUES ('repo')`)
+			if err != nil {
+				t.Fatalf("insert repo project: %v", err)
+			}
+			repoID, _ := res.LastInsertId()
+			if _, err := db.Exec(`INSERT INTO project_paths(path, project_id) VALUES (?, ?)`, filepath.Clean(repoDir), repoID); err != nil {
+				t.Fatalf("insert repo path: %v", err)
+			}
+
+			tt.ingest(t, db, t.TempDir())
+
+			var projectID int64
+			var startedAt, meta string
+			if err := db.QueryRow(`SELECT project_id, started_at, meta FROM sessions WHERE id = ?`, sessionID).
+				Scan(&projectID, &startedAt, &meta); err != nil {
+				t.Fatalf("query session: %v", err)
+			}
+			if projectID != repoID {
+				t.Errorf("project_id = %d, want the repo's %d (parent folder is %d)", projectID, repoID, parentID)
+			}
+			if startedAt != started {
+				t.Errorf("started_at = %q, want the main transcript's first line %q", startedAt, started)
+			}
+			if strings.Contains(meta, "provisional_project") {
+				t.Errorf("meta = %s, want the provisional marker cleared", meta)
+			}
+		})
+	}
+}
+
+// A session whose row is created by a line with no cwd and no timestamp (an
+// ai-title read first) must still get its project and started_at from the
+// first line that carries them, instead of keeping NULL and "" for good.
+func TestRunFillsProjectAndStartFromFirstLineThatHasThem(t *testing.T) {
+	db := openTestDB(t)
+	content := `{"type":"ai-title","aiTitle":"Untimed","sessionId":"sess-late"}
+{"type":"user","message":{"role":"user","content":"hello"},"sessionId":"sess-late","cwd":"/home/dev/proj","timestamp":"2026-09-20T10:00:00Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]},"sessionId":"sess-late","cwd":"/home/dev/other","timestamp":"2026-09-20T10:00:01Z"}
+`
+	path := filepath.Join(t.TempDir(), "sess-late.jsonl")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	if err := ingest.Run(db, claudecode.New(), path); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	want, ok, err := store.LookupProject(db, "/home/dev/proj")
+	if err != nil || !ok {
+		t.Fatalf("LookupProject = %d, %v, %v; want the first cwd registered", want, ok, err)
+	}
+	var projectID sql.NullInt64
+	var startedAt string
+	if err := db.QueryRow(`SELECT project_id, started_at FROM sessions WHERE id = 'claude-code:sess-late'`).Scan(&projectID, &startedAt); err != nil {
+		t.Fatalf("query session: %v", err)
+	}
+	if !projectID.Valid || projectID.Int64 != want {
+		t.Errorf("project_id = %v, want %d from the first line with a cwd", projectID, want)
+	}
+	if startedAt != "2026-09-20T10:00:00Z" {
+		t.Errorf("started_at = %q, want the first line with a timestamp", startedAt)
+	}
+}
