@@ -16,6 +16,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/danPoku/kaectx/internal/governance"
 	"github.com/danPoku/kaectx/internal/ingest"
 	"github.com/danPoku/kaectx/internal/ingest/claudecode"
 	"github.com/danPoku/kaectx/internal/mcpserver"
@@ -248,6 +249,102 @@ func TestRecordRetrievalOutcomeRequiresExactTarget(t *testing.T) {
 	})
 	if err == nil && !res.IsError {
 		t.Fatal("chunk-only outcome succeeded, want an exact-target error")
+	}
+}
+
+func TestRecordSearchOutcome(t *testing.T) {
+	cs, db := testServer(t)
+	var searchOut struct {
+		RunID string `json:"run_id"`
+	}
+	callTool(t, cs, "search_context", map[string]any{"query": "WAL"}, &searchOut)
+	if searchOut.RunID == "" {
+		t.Fatal("search did not return a run id")
+	}
+
+	// Make the top hit's evidence credible, so a change to its assessment
+	// would show.
+	for i := 0; i < 3; i++ {
+		var s struct {
+			RunID string `json:"run_id"`
+		}
+		callTool(t, cs, "search_context", map[string]any{"query": "WAL"}, &s)
+		var labelled struct{}
+		callTool(t, cs, "record_retrieval_outcome", map[string]any{"run_id": s.RunID, "rank": 1, "outcome": "stale"}, &labelled)
+	}
+	assess := func() governance.Assessment {
+		t.Helper()
+		var projectID int64
+		var e governance.Evidence
+		if err := db.QueryRow(`SELECT rr.project_id, rc.evidence_key, rc.session_id, rc.first_seq, rc.last_seq
+			FROM retrieval_candidates rc JOIN retrieval_runs rr ON rr.id=rc.run_id
+			WHERE rc.run_id=? AND rc.rank=1`, searchOut.RunID).Scan(&projectID, &e.Key, &e.SessionID, &e.FirstSeq, &e.LastSeq); err != nil {
+			t.Fatal(err)
+		}
+		a, err := governance.Assess(db, projectID, e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	before := assess()
+	if before.Neutral {
+		t.Fatalf("setup: evidence still neutral after three labels: %+v", before)
+	}
+
+	var out struct {
+		Recorded bool   `json:"recorded"`
+		Outcome  string `json:"outcome"`
+		Reason   string `json:"reason"`
+	}
+	fakeSecret := "ghp_" + strings.Repeat("B", 36)
+	callTool(t, cs, "record_search_outcome", map[string]any{
+		"run_id": searchOut.RunID, "outcome": "partial", "reason": "wrong_project",
+		"note": "missed the API session " + fakeSecret,
+	}, &out)
+	if !out.Recorded || out.Outcome != "partial" || out.Reason != "wrong_project" {
+		t.Fatalf("result = %+v", out)
+	}
+	// A second verdict on the same run replaces the first.
+	callTool(t, cs, "record_search_outcome", map[string]any{
+		"run_id": searchOut.RunID, "outcome": "unhelpful", "reason": "not_indexed",
+	}, &out)
+	var rows int
+	var outcome, reason string
+	var note sql.NullString
+	if err := db.QueryRow(`SELECT COUNT(*), MAX(outcome), MAX(reason), MAX(note) FROM retrieval_run_observations WHERE run_id=?`, searchOut.RunID).
+		Scan(&rows, &outcome, &reason, &note); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 || outcome != "unhelpful" || reason != "not_indexed" || note.Valid {
+		t.Errorf("stored = %d rows, %s/%s note %v; want 1 row, unhelpful/not_indexed, no note", rows, outcome, reason, note)
+	}
+
+	if after := assess(); after != before {
+		t.Errorf("search outcome changed the hit's assessment: before %+v, after %+v", before, after)
+	}
+
+	// The note is redacted before storage.
+	callTool(t, cs, "record_search_outcome", map[string]any{
+		"run_id": searchOut.RunID, "outcome": "partial", "reason": "ranking", "note": "token " + fakeSecret,
+	}, &out)
+	if err := db.QueryRow(`SELECT note FROM retrieval_run_observations WHERE run_id=?`, searchOut.RunID).Scan(&note); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(note.String, fakeSecret) || !strings.Contains(note.String, "[REDACTED]") {
+		t.Errorf("stored note was not redacted: %q", note.String)
+	}
+
+	for name, args := range map[string]map[string]any{
+		"unknown run":         {"run_id": "no-such-run", "outcome": "partial", "reason": "ranking"},
+		"reason outside set":  {"run_id": searchOut.RunID, "outcome": "partial", "reason": "too_slow"},
+		"per-hit outcome":     {"run_id": searchOut.RunID, "outcome": "stale"},
+		"helpful with reason": {"run_id": searchOut.RunID, "outcome": "helpful", "reason": "ranking"},
+	} {
+		res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "record_search_outcome", Arguments: args})
+		if err == nil && !res.IsError {
+			t.Errorf("%s: succeeded, want an error", name)
+		}
 	}
 }
 

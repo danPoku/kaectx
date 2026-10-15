@@ -7,8 +7,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/danPoku/kaectx/internal/doctor"
+	"github.com/danPoku/kaectx/internal/feedback"
 	"github.com/danPoku/kaectx/internal/store"
 )
 
@@ -64,11 +66,27 @@ outcomes (retained evidence)
   observations: %d
   coverage: %d / %d evidence keys (%.1f%%)
   credible / still neutral: %d / %d
+
+search outcomes (last 7 days)
+  %s
+  reasons: %s
 `, r.ProjectName, r.Sources, r.SourcesWithErrors, lastIngest,
 		r.Sessions, r.Messages, r.Chunks, r.PendingEmbeddings, r.UnassignedChunks,
 		r.RecentRetrievals, r.RecentZeroResultRuns, r.RecentHybridRuns, r.RecentPolicyRuns,
 		r.RecentOpenedResults, r.RecentOpenedResults-r.RecentInferredOpens, r.RecentInferredOpens,
 		r.RecentLabelledOpens, r.RecentOpenedResults-r.RecentLabelledOpens,
 		r.Outcomes, r.ObservedEvidence, r.RetrievedEvidence, r.OutcomeCoverage(),
-		r.CredibleEvidence, r.NeutralObservedEvidence())
+		r.CredibleEvidence, r.NeutralObservedEvidence(),
+		formatCounts(feedback.SearchOutcomes, r.SearchOutcomes),
+		formatCounts(feedback.SearchReasons, r.SearchReasons))
+}
+
+// formatCounts prints counts in the fixed order of keys, e.g.
+// "helpful 3, partial 1, unhelpful 0", so the line reads the same every run.
+func formatCounts(keys []string, counts map[string]int) string {
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s %d", k, counts[k])
+	}
+	return strings.Join(parts, ", ")
 }

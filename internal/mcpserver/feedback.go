@@ -31,6 +31,20 @@ type recordOutcomeResult struct {
 	AssessmentError string `json:"assessment_error,omitempty"`
 }
 
+type searchOutcomeArgs struct {
+	RunID   string `json:"run_id" jsonschema:"run_id returned by search_context"`
+	Outcome string `json:"outcome" jsonschema:"one of helpful, partial, unhelpful: did the search as a whole answer the question?"`
+	Reason  string `json:"reason,omitempty" jsonschema:"for partial or unhelpful, the gap: wrong_project (answer was in another project), not_indexed (a relevant session was not ingested yet), stale_state (hits were overtaken by later work), ranking (relevant results ranked too low)"`
+	Note    string `json:"note,omitempty" jsonschema:"optional explanation, e.g. what was missing; secrets are redacted before storage"`
+}
+
+type searchOutcomeResult struct {
+	Recorded bool   `json:"recorded"`
+	RunID    string `json:"run_id"`
+	Outcome  string `json:"outcome"`
+	Reason   string `json:"reason,omitempty"`
+}
+
 type feedbackStatusArgs struct {
 	Limit int `json:"limit,omitempty" jsonschema:"maximum number of nudges to return; defaults to 10 and is capped at 25"`
 }
@@ -70,9 +84,15 @@ var validCheckpointOutcomes = map[string]bool{
 
 func (s *server) registerFeedback(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "record_retrieval_outcome",
-		Description: "Record whether retrieved context was helpful, unhelpful, stale, incorrect, or superseded once its usefulness is known. Use the exact run_id and rank returned by search_context or get_chunk. Record the honest result even when negative. Opening is tracked separately and never counts as helpful.",
+		Name: "record_retrieval_outcome",
+		Description: "Record whether retrieved context was helpful, unhelpful, stale, incorrect, or superseded once its usefulness is known. Use the exact run_id and rank returned by search_context or get_chunk. Record the honest result even when negative. Opening is tracked separately and never counts as helpful. " +
+			"Judge only what this result contained: if it was right but the search missed other context, label this result helpful and record the gap with record_search_outcome.",
 	}, s.recordRetrievalOutcome)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "record_search_outcome",
+		Description: "Record whether a search as a whole answered the question: helpful, partial, or unhelpful, and for partial or unhelpful the reason (wrong_project, not_indexed, stale_state, ranking). Use the run_id returned by search_context. " +
+			"This is separate from record_retrieval_outcome and never changes any result's reliability; use it for what the search missed, not for what a result contained. A second call for the same run replaces the first.",
+	}, s.recordSearchOutcome)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "feedback_status",
 		Description: "Return a small inbox of high-confidence feedback opportunities derived from recorded CTX activity. Call at natural milestones. A nudge reports missing feedback, never infers that retrieved context was helpful or harmful. Ask only when the answer is already apparent or the interruption is worthwhile.",
@@ -96,6 +116,13 @@ func (s *server) recordRetrievalOutcome(_ context.Context, _ *mcp.CallToolReques
 		out.AssessmentError = got.AssessErr.Error()
 	}
 	return nil, out, nil
+}
+
+func (s *server) recordSearchOutcome(_ context.Context, _ *mcp.CallToolRequest, args searchOutcomeArgs) (*mcp.CallToolResult, searchOutcomeResult, error) {
+	if err := feedback.RecordSearch(s.db, s.projectID, args.RunID, args.Outcome, args.Reason, args.Note); err != nil {
+		return nil, searchOutcomeResult{}, err
+	}
+	return nil, searchOutcomeResult{Recorded: true, RunID: args.RunID, Outcome: args.Outcome, Reason: args.Reason}, nil
 }
 
 func (s *server) feedbackStatus(_ context.Context, _ *mcp.CallToolRequest, args feedbackStatusArgs) (*mcp.CallToolResult, feedbackStatusResult, error) {
@@ -170,7 +197,7 @@ func (s *server) pendingRetrievalNudges(limit int) ([]feedbackNudge, error) {
 		}
 		nudge := feedbackNudge{
 			Kind: "retrieval_outcome_missing", Source: "opened_result", Confidence: "high",
-			Prompt: "If this retrieved evidence influenced the work, record its honest outcome; opening it alone is not a helpful label.",
+			Prompt: "If this retrieved evidence influenced the work, record its honest outcome for what it contained; opening it alone is not a helpful label. Context the search missed belongs in record_search_outcome.",
 			RunID:  runID, Rank: rank, Query: query,
 		}
 		if inferredOnly {
