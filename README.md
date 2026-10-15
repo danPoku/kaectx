@@ -207,7 +207,9 @@ database; `touches` and `git` also read the sessions' git repositories:
   in a parent folder's project and vanish from its repo's search. It also sets
   each session's start to its earliest message, lists every session it moves,
   and never creates a project: a session whose first folder no known project
-  owns is left as it is.
+  owns is left as it is. Other agents' sessions are re-filed by the folder
+  they logged, which merges one folder that older versions split by spelling
+  (`C:\x` and `/mnt/c/x`) and moves git worktree sessions to their repo.
 
 `ctx explain <path>` is also project-scoped. The path is project-relative, such
 as `internal/store/store.go`.
@@ -305,7 +307,7 @@ a new chat.
 | --- | --- |
 | `search_context` | Keyword plus semantic search over past sessions in this project, across all agents. Returns snippets centred on the match, each with the time of the turn, the message range (`first_seq`, `last_seq`) of the exchange it came from, and a `next_step` holding the exact `get_chunk` call that opens it. The search's ID is `run_id`; `retrieval_run_id` carries the same value and is deprecated. `since`/`until` limit it to one period. |
 | `get_chunk` | Reads one search hit in full, the user turn and the assistant's reply (about 1k tokens), by `chunk_id`. Pass the search's `run_id` and the hit's `rank` together to record the exact result as opened; passing only one of them is an error. With `chunk_id` alone, the open is attributed to the latest search in the past day that returned the chunk and flagged `open_inferred`. When an open is recorded, `next_step` holds the `record_retrieval_outcome` call that labels it. |
-| `get_session` | Reads a session's messages in order. Conversation text only unless `include_tools` is set; capped by total characters (`max_chars`, default 20000) and by message length, with `next_from_seq` for paging. Pass a search's `run_id` and a hit's `rank` to record the read as an open of that hit; it counts only if the messages returned overlap the hit. Sessions from other projects read as absent. |
+| `get_session` | Reads a session's messages in order. Conversation text only unless `include_tools` is set; capped by total characters (`max_chars`, default 20000) and by message length, with `next_from_seq` for paging. Pass a search's `run_id` and a hit's `rank` to record the read as an open of that hit; it counts only if the messages returned overlap the hit. A session from another project is an error that names that project; its messages are not returned. |
 | `recent_sessions` | Lists recent sessions, newest first; `since`/`until` list the sessions active in a period. |
 | `sessions_touching` | Sessions that read or edited a given file. |
 | `explain_file` | Builds a compact briefing for a file: sessions that touched it, actions, known git commit span, and chunk ids to open for the reasoning behind the work. |
@@ -449,7 +451,11 @@ embedded yet, search runs keyword-only and reports that it did.
 
 **Projects.** The current directory is matched to a known project by longest
 path prefix. A new directory inside a git repository with an `origin` remote
-takes that remote, normalised to `host/owner/repo`, as its identity.
+takes that remote, normalised to `host/owner/repo`, as its identity. Paths
+match whatever their spelling: `C:\x`, `c:\x` and the WSL `/mnt/c/x` are one
+folder, while Linux paths stay case-sensitive. A directory inside a linked git
+worktree belongs to its repository's project, even when the worktree sits
+under a folder that is a project of its own.
 
 **Storage.** SQLite in WAL mode with strict tables. The schema is in
 `migrations/`. The vector table is optional: if the extension fails to load,

@@ -77,6 +77,9 @@ func (s *server) getChunk(_ context.Context, _ *mcp.CallToolRequest, args getChu
 	err = s.db.QueryRow(sqlText, sql.Named("chunk_id", args.ChunkID), sql.Named("project_id", s.projectID)).
 		Scan(&out.ChunkID, &out.SessionID, &out.Agent, &out.FirstSeq, &out.LastSeq, &out.Text, &out.At)
 	if errors.Is(err, sql.ErrNoRows) {
+		if err := s.absentError("ChunkOwner", "chunk_id", "chunk", args.ChunkID); err != nil {
+			return nil, getChunkResult{}, err
+		}
 		return nil, getChunkResult{}, fmt.Errorf("no chunk %d in this project", args.ChunkID)
 	}
 	if err != nil {

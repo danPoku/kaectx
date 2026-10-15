@@ -341,7 +341,7 @@ SELECT p.id,
 SELECT seq, role, kind, tool_name, content, created_at
   FROM messages
  WHERE session_id = :session_id
-   AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = :session_id AND s.project_id = :project_id) -- another project's session reads as absent, as in GetChunk
+   AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = :session_id AND s.project_id = :project_id) -- another project's session returns nothing; the app then says why (SessionOwner)
    AND seq BETWEEN :from_seq AND :to_seq
    AND kind <> 'thinking'                          -- reasoning traces rarely help retrieval
    AND (:include_tools = 1 OR kind = 'text')
@@ -362,7 +362,8 @@ SELECT MIN(seq)
 
 -- name: GetChunk :one
 -- One chunk (a user turn + the assistant's reply, ~900 tokens) by id, scoped
--- to the caller's project so a chunk id from another project reads as absent.
+-- to the caller's project. A chunk id from another project returns no row; the
+-- app then says why (ChunkOwner).
 SELECT c.id, c.session_id, s.agent, c.first_seq, c.last_seq, c.text,
        COALESCE((SELECT MIN(m.created_at) FROM messages m
                  WHERE m.session_id = c.session_id
@@ -373,6 +374,26 @@ SELECT c.id, c.session_id, s.agent, c.first_seq, c.last_seq, c.text,
   JOIN sessions s ON s.id = c.session_id
  WHERE c.id = :chunk_id
    AND s.project_id = :project_id;
+
+
+-- name: SessionOwner :one
+-- Which project a session is filed under, read only after a scoped read came
+-- back empty, to tell "not in this project" from "no such session". Returns
+-- no row for an unknown id; project_id and name are NULL for a session no
+-- project owns.
+SELECT s.project_id, p.name
+  FROM sessions s
+  LEFT JOIN projects p ON p.id = s.project_id
+ WHERE s.id = :session_id;
+
+
+-- name: ChunkOwner :one
+-- SessionOwner for a chunk id.
+SELECT s.project_id, p.name
+  FROM chunks c
+  JOIN sessions s ON s.id = c.session_id
+  LEFT JOIN projects p ON p.id = s.project_id
+ WHERE c.id = :chunk_id;
 
 
 -- name: SearchNotes :many

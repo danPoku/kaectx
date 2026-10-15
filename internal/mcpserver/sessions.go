@@ -6,6 +6,7 @@ package mcpserver
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -255,6 +256,11 @@ func (s *server) getSession(_ context.Context, _ *mcp.CallToolRequest, args getS
 	if err := rows.Err(); err != nil {
 		return nil, getSessionResult{}, err
 	}
+	if len(out.Messages) == 0 {
+		if err := s.absentError("SessionOwner", "session_id", "session", args.SessionID); err != nil {
+			return nil, getSessionResult{}, err
+		}
+	}
 
 	if resumeAt == nil && !explicitRange {
 		// We chose the window; report whether messages remain past it.
@@ -289,6 +295,35 @@ func (s *server) getSession(_ context.Context, _ *mcp.CallToolRequest, args getS
 		}
 	}
 	return nil, out, nil
+}
+
+// absentError explains an id that a project-scoped read found nothing for.
+// A session or chunk filed under another project used to come back empty,
+// which an agent cannot tell from a real session with nothing in range, so it
+// would conclude the work never happened. Naming the owner tells it where to
+// look instead. It returns nil when the id does belong to this project: then
+// the empty read was genuine (say, a range past the session's end).
+func (s *server) absentError(queryName, param, what string, id any) error {
+	q, err := store.LoadQuery(queries.FS, "retrieval.sql", queryName)
+	if err != nil {
+		return err
+	}
+	var owner sql.NullInt64
+	var name sql.NullString
+	err = s.db.QueryRow(q, sql.Named(param, id)).Scan(&owner, &name)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return fmt.Errorf("no %s %v", what, id)
+	case err != nil:
+		return err
+	case owner.Valid && owner.Int64 == s.projectID:
+		return nil
+	case !owner.Valid:
+		return fmt.Errorf("%s %v is not filed under any project, so no project's tools can read it", what, id)
+	default:
+		return fmt.Errorf("%s %v belongs to another project, %s (id %d); ctx tools read only the project this server was started in",
+			what, id, name.String, owner.Int64)
+	}
 }
 
 // truncateChars cuts s to at most n runes (never mid-character), appending a
