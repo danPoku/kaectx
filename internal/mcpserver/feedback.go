@@ -65,6 +65,11 @@ type feedbackNudge struct {
 type feedbackStatusResult struct {
 	Pending int             `json:"pending"`
 	Nudges  []feedbackNudge `json:"nudges"`
+	// PendingSearches lists searches this server process served that have no
+	// whole-search outcome yet. It is capped by the same limit as nudges and
+	// kept out of them: a nudge is derived from the database and is the same
+	// for every agent, while this list belongs to the calling session alone.
+	PendingSearches []pendingSearch `json:"pending_searches"`
 }
 
 type checkpointOutcomeArgs struct {
@@ -96,11 +101,11 @@ func (s *server) registerFeedback(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "record_search_outcome",
 		Description: "Record whether a search as a whole answered the question: helpful, partial, or unhelpful, and for partial or unhelpful the reason (wrong_project, not_indexed, stale_state, ranking). Use the run_id returned by search_context. " +
-			"This is separate from record_retrieval_outcome and never changes any result's reliability; use it for what the search missed, not for what a result contained. A second call for the same run replaces the first.",
+			"Record one for every search, not only the ones that fell short: a search answered by its snippets alone, with nothing opened, is helpful. This is separate from record_retrieval_outcome and never changes any result's reliability; use it for what the search missed, not for what a result contained. A second call for the same run replaces the first.",
 	}, s.recordSearchOutcome)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "feedback_status",
-		Description: "Return a small inbox of high-confidence feedback opportunities derived from recorded CTX activity. Call at natural milestones. A nudge reports missing feedback, never infers that retrieved context was helpful or harmful. Ask only when the answer is already apparent or the interruption is worthwhile.",
+		Description: "Return a small inbox of high-confidence feedback opportunities derived from recorded CTX activity. Call at natural milestones. A nudge reports missing feedback, never infers that retrieved context was helpful or harmful. Ask only when the answer is already apparent or the interruption is worthwhile. pending_searches lists your own searches in this session that have no whole-search outcome yet; make each one's next_step call (a search answered by its snippets alone is helpful).",
 	}, s.feedbackStatus)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "record_checkpoint_outcome",
@@ -138,7 +143,7 @@ func (s *server) feedbackStatus(_ context.Context, _ *mcp.CallToolRequest, args 
 	if limit > 25 {
 		limit = 25
 	}
-	out := feedbackStatusResult{Nudges: []feedbackNudge{}}
+	out := feedbackStatusResult{Nudges: []feedbackNudge{}, PendingSearches: []pendingSearch{}}
 
 	rows, err := s.db.Query(`SELECT session_id, level FROM checkpoint_observations
 		WHERE project_id=? AND outcome IS NULL AND level<>'healthy'
@@ -173,6 +178,9 @@ func (s *server) feedbackStatus(_ context.Context, _ *mcp.CallToolRequest, args 
 		out.Nudges = append(out.Nudges, pending...)
 	}
 	out.Pending = len(out.Nudges)
+	if out.PendingSearches, err = s.pendingSearches(limit); err != nil {
+		return nil, out, err
+	}
 	return nil, out, nil
 }
 

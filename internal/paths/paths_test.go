@@ -40,16 +40,21 @@ func TestRelIfWithinAcrossPathStyles(t *testing.T) {
 
 func TestKeyMatchesEverySpellingOfOneFolder(t *testing.T) {
 	cases := []struct{ name, in, want string }{
-		{"windows", `C:\Users\kojog\NIORA`, "c:/users/kojog/niora"},
-		{"lowercase drive", `c:\Users\kojog\NIORA`, "c:/users/kojog/niora"},
-		{"forward slashes", `C:/Users/kojog/NIORA/`, "c:/users/kojog/niora"},
-		{"wsl mount", "/mnt/c/Users/kojog/NIORA", "c:/users/kojog/niora"},
-		{"wsl mount upper", "/mnt/C/Users/kojog/NIORA", "c:/users/kojog/niora"},
+		{"windows", `C:\Users\dev\REPO`, "c:/users/dev/repo"},
+		{"lowercase drive", `c:\Users\dev\REPO`, "c:/users/dev/repo"},
+		{"forward slashes", `C:/Users/dev/REPO/`, "c:/users/dev/repo"},
+		{"wsl mount", "/mnt/c/Users/dev/REPO", "c:/users/dev/repo"},
+		{"wsl mount upper", "/mnt/C/Users/dev/REPO", "c:/users/dev/repo"},
 		{"drive root", `C:\`, "c:"},
 		{"wsl drive root", "/mnt/c", "c:"},
 		{"unc", `\\Server\Share\Repo`, "//server/share/repo"},
 		{"posix keeps case", "/home/Dev/repo", "/home/Dev/repo"},
 		{"not a mount", "/mnt/data/repo", "/mnt/data/repo"},
+		{"git bash drive", "/c/Users/dev/Repo", "c:/users/dev/repo"},
+		{"git bash drive upper", "/C/Users/dev/Repo", "c:/users/dev/repo"},
+		{"git bash drive root", "/c", "c:"},
+		{"git bash drive root slash", "/c/", "c:"},
+		{"two-letter root folder", "/cx/repo", "/cx/repo"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

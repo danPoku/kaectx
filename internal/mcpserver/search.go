@@ -57,6 +57,11 @@ type searchContextResult struct {
 	// clients that read it keep working. Deprecated: use run_id.
 	RetrievalRunID    string `json:"retrieval_run_id,omitempty"`
 	TelemetryRecorded bool   `json:"telemetry_recorded"`
+	// OutcomeNextStep is the record_search_outcome call for this search. Per-hit
+	// labels only judge what an agent opened, so they are almost all positive;
+	// a search nobody opened anything from says nothing unless the agent is
+	// asked about the search itself.
+	OutcomeNextStep string `json:"outcome_next_step,omitempty"`
 	// UsedSemanticSearch tells the caller whether this ran keyword+semantic
 	// fusion or fell back to keyword-only (no embedding worker has caught
 	// up yet, or the local Ollama isn't reachable) — visible so an agent
@@ -97,7 +102,8 @@ func (s *server) registerSearch(srv *mcp.Server) {
 		Description: "Keyword search over past coding-agent sessions in this project — across every agent that's been ingested (Claude Code, Codex, ...), not just the one calling this tool. " +
 			"Returns short snippets, not full transcripts. To read a hit, make the call in its next_step: get_chunk with its chunk_id, the result's run_id and the hit's rank (the matching exchange, ~1k tokens). Or call get_session with its session_id, from_seq/to_seq set to the hit's first_seq/last_seq, and the same run_id and rank. " +
 			"For questions about a period (\"what happened last week\"), set since/until: otherwise older, stronger matches outrank the period you asked about. " +
-			"If the result's index.warning is set, ctx has not read some recent logs yet; say so rather than concluding nothing happened.",
+			"If the result's index.warning is set, ctx has not read some recent logs yet; say so rather than concluding nothing happened. " +
+			"Once you know whether the search answered your question, make the call in outcome_next_step. A search answered by its snippets alone, with nothing opened, is helpful; one that returned nothing useful is unhelpful, with the reason.",
 	}, s.searchContext)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -119,7 +125,9 @@ func (s *server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, args
 	if err != nil {
 		return nil, searchContextResult{}, err
 	}
-	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RunID: got.RunID, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil, GovernanceApplied: got.GovernanceApplied, Index: s.indexStatus()}
+	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RunID: got.RunID, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil, GovernanceApplied: got.GovernanceApplied, Index: s.indexStatus(),
+		OutcomeNextStep: searchOutcomeCall(got.RunID)}
+	s.served.add(got.RunID, args.Query)
 	for i, r := range got.Results {
 		out.Results[i] = searchContextHit{
 			Rank: i + 1, ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent,
