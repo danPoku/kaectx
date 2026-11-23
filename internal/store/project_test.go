@@ -141,15 +141,15 @@ func TestLookupProjectNeverRegistersProjectsOrPaths(t *testing.T) {
 }
 
 // TestResolveProjectIsSpellingBlind covers the spellings one Windows folder
-// arrives in: drive-letter case and the WSL mount. Each must resolve to the
-// first spelling's project without adding a path row.
+// arrives in: drive-letter case, the WSL mount and the Git Bash drive form.
+// Each must resolve to the first spelling's project without adding a path row.
 func TestResolveProjectIsSpellingBlind(t *testing.T) {
 	db := migratedTestDB(t)
 	first, err := ResolveProject(db, `C:\x\repo`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, spelling := range []string{`c:\x\repo`, "/mnt/c/x/repo", `C:/X/Repo/pkg`} {
+	for _, spelling := range []string{`c:\x\repo`, "/mnt/c/x/repo", "/c/x/repo", `C:/X/Repo/pkg`} {
 		got, err := ResolveProject(db, spelling)
 		if err != nil {
 			t.Fatalf("ResolveProject(%q): %v", spelling, err)
@@ -173,8 +173,8 @@ func TestResolveProjectIsSpellingBlind(t *testing.T) {
 func TestLookupProjectPicksLowerIDWhenSpellingsWereSplit(t *testing.T) {
 	db := migratedTestDB(t)
 	var ids []int64
-	for _, p := range []string{"/mnt/c/Users/dev/NIORA", `C:\Users\dev\NIORA`} {
-		res, err := db.Exec(`INSERT INTO projects(name) VALUES ('NIORA')`)
+	for _, p := range []string{"/mnt/c/Users/dev/REPO", `C:\Users\dev\REPO`} {
+		res, err := db.Exec(`INSERT INTO projects(name) VALUES ('REPO')`)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -184,7 +184,7 @@ func TestLookupProjectPicksLowerIDWhenSpellingsWereSplit(t *testing.T) {
 		}
 		ids = append(ids, id)
 	}
-	for _, spelling := range []string{"/mnt/c/Users/dev/NIORA", `C:\Users\dev\NIORA`, `c:\users\dev\niora\api`} {
+	for _, spelling := range []string{"/mnt/c/Users/dev/REPO", `C:\Users\dev\REPO`, `c:\users\dev\repo\api`} {
 		got, ok, err := LookupProject(db, spelling)
 		if err != nil || !ok || got != ids[0] {
 			t.Errorf("LookupProject(%q) = %d, %v, %v; want %d, true, nil", spelling, got, ok, err, ids[0])

@@ -20,7 +20,7 @@ func TestFormatSearchShowsRunAndRanks(t *testing.T) {
 		{Agent: "codex", SessionID: "codex:s", FirstSeq: 1, LastSeq: 2, Snippet: "first"},
 		{Agent: "claude-code", SessionID: "claude-code:t", FirstSeq: 3, LastSeq: 4, Snippet: "second"},
 	}}
-	out := formatSearch(got)
+	out := formatSearch(got, false)
 	for _, want := range []string{"run abc123", "ctx feedback abc123 <rank> <outcome>", "#1 [codex]", "#2 [claude-code]"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
@@ -30,7 +30,7 @@ func TestFormatSearchShowsRunAndRanks(t *testing.T) {
 	// Without a recorded run there is nothing to label, so no run line and
 	// no ranks that would suggest otherwise.
 	got.RunID = ""
-	out = formatSearch(got)
+	out = formatSearch(got, false)
 	if strings.Contains(out, "run ") || strings.Contains(out, "ctx feedback") || strings.Contains(out, "#1") {
 		t.Errorf("output without a run ID still offers labelling:\n%s", out)
 	}
@@ -40,7 +40,7 @@ func TestFormatSearchShowsRunAndRanks(t *testing.T) {
 
 	// A run ID beside a telemetry error names a run that was never stored.
 	got.RunID, got.TelemetryErr = "abc123", errors.New("commit failed")
-	out = formatSearch(got)
+	out = formatSearch(got, false)
 	if strings.Contains(out, "abc123") || strings.Contains(out, "#1") {
 		t.Errorf("output offers labelling for an unrecorded run:\n%s", out)
 	}
@@ -117,5 +117,21 @@ func TestFeedbackRejectsBadInputWithoutWriting(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("%d observations written by rejected calls, want 0", n)
+	}
+}
+
+func TestFormatSearchNamesProjectsOnlyWhenAsked(t *testing.T) {
+	got := search.BestResult{RunID: "abc123", Results: []search.Result{
+		{Agent: "codex", SessionID: "codex:s", ProjectName: "api", Snippet: "first"},
+		{Agent: "claude-code", SessionID: "claude-code:t", ProjectName: "frontend", Snippet: "second"},
+	}}
+	all := formatSearch(got, true)
+	for _, want := range []string{"#1 (api) [codex]", "#2 (frontend) [claude-code]"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("all-projects output missing %q:\n%s", want, all)
+		}
+	}
+	if one := formatSearch(got, false); strings.Contains(one, "(api)") || strings.Contains(one, "(frontend)") {
+		t.Errorf("a project-scoped search names projects it has no need to:\n%s", one)
 	}
 }

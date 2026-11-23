@@ -5,6 +5,8 @@ package mcpserver
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -63,18 +65,26 @@ type feedbackNudge struct {
 type feedbackStatusResult struct {
 	Pending int             `json:"pending"`
 	Nudges  []feedbackNudge `json:"nudges"`
+	// PendingSearches lists searches this server process served that have no
+	// whole-search outcome yet. It is capped by the same limit as nudges and
+	// kept out of them: a nudge is derived from the database and is the same
+	// for every agent, while this list belongs to the calling session alone.
+	PendingSearches []pendingSearch `json:"pending_searches"`
 }
 
 type checkpointOutcomeArgs struct {
 	SessionID string `json:"session_id" jsonschema:"session_id returned by checkpoint_status or feedback_status"`
 	Outcome   string `json:"outcome" jsonschema:"one of started_new_session, saved_handoff, continued, dismissed"`
 	Note      string `json:"note,omitempty" jsonschema:"optional explanation; secrets are redacted before storage"`
+	// NoteID is 0 when absent: note IDs start at 1.
+	NoteID int64 `json:"note_id,omitempty" jsonschema:"for saved_handoff, the id save_note returned for the handoff note, so ctx can tell later whether a session read it"`
 }
 
 type checkpointOutcomeResult struct {
 	Recorded  bool   `json:"recorded"`
 	SessionID string `json:"session_id"`
 	Outcome   string `json:"outcome"`
+	NoteID    int64  `json:"note_id,omitempty"`
 }
 
 var validCheckpointOutcomes = map[string]bool{
@@ -91,15 +101,15 @@ func (s *server) registerFeedback(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "record_search_outcome",
 		Description: "Record whether a search as a whole answered the question: helpful, partial, or unhelpful, and for partial or unhelpful the reason (wrong_project, not_indexed, stale_state, ranking). Use the run_id returned by search_context. " +
-			"This is separate from record_retrieval_outcome and never changes any result's reliability; use it for what the search missed, not for what a result contained. A second call for the same run replaces the first.",
+			"Record one for every search, not only the ones that fell short: a search answered by its snippets alone, with nothing opened, is helpful. This is separate from record_retrieval_outcome and never changes any result's reliability; use it for what the search missed, not for what a result contained. A second call for the same run replaces the first.",
 	}, s.recordSearchOutcome)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "feedback_status",
-		Description: "Return a small inbox of high-confidence feedback opportunities derived from recorded CTX activity. Call at natural milestones. A nudge reports missing feedback, never infers that retrieved context was helpful or harmful. Ask only when the answer is already apparent or the interruption is worthwhile.",
+		Description: "Return a small inbox of high-confidence feedback opportunities derived from recorded CTX activity. Call at natural milestones. A nudge reports missing feedback, never infers that retrieved context was helpful or harmful. Ask only when the answer is already apparent or the interruption is worthwhile. pending_searches lists your own searches in this session that have no whole-search outcome yet; make each one's next_step call (a search answered by its snippets alone is helpful).",
 	}, s.feedbackStatus)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "record_checkpoint_outcome",
-		Description: "Record the user's response to a checkpoint recommendation. Use the exact session_id and one of started_new_session, saved_handoff, continued, or dismissed.",
+		Description: "Record the user's response to a checkpoint check. Use the exact session_id and one of started_new_session, saved_handoff, continued, or dismissed. After a healthy check, with no recommendation made, only continued applies. For saved_handoff, pass note_id with the id save_note returned for the handoff, so ctx can tell later whether a session picked it up.",
 	}, s.recordCheckpointOutcome)
 }
 
@@ -133,10 +143,11 @@ func (s *server) feedbackStatus(_ context.Context, _ *mcp.CallToolRequest, args 
 	if limit > 25 {
 		limit = 25
 	}
-	out := feedbackStatusResult{Nudges: []feedbackNudge{}}
+	out := feedbackStatusResult{Nudges: []feedbackNudge{}, PendingSearches: []pendingSearch{}}
 
 	rows, err := s.db.Query(`SELECT session_id, level FROM checkpoint_observations
-		WHERE project_id=? AND outcome IS NULL ORDER BY recommended_at DESC LIMIT ?`, s.projectID, limit)
+		WHERE project_id=? AND outcome IS NULL AND level<>'healthy'
+		ORDER BY recommended_at DESC LIMIT ?`, s.projectID, limit)
 	if err != nil {
 		return nil, out, err
 	}
@@ -167,6 +178,9 @@ func (s *server) feedbackStatus(_ context.Context, _ *mcp.CallToolRequest, args 
 		out.Nudges = append(out.Nudges, pending...)
 	}
 	out.Pending = len(out.Nudges)
+	if out.PendingSearches, err = s.pendingSearches(limit); err != nil {
+		return nil, out, err
+	}
 	return nil, out, nil
 }
 
@@ -217,9 +231,18 @@ func (s *server) recordCheckpointOutcome(_ context.Context, _ *mcp.CallToolReque
 	if args.Note != "" {
 		note = redact.Redact(args.Note)
 	}
+	noteID, err := s.handoffNoteID(args)
+	if err != nil {
+		return nil, checkpointOutcomeResult{}, err
+	}
+	// A healthy check made no recommendation, so there was nothing to save,
+	// dismiss or leave: the only thing the user can have done is carry on.
+	// The level test sits in the UPDATE itself so a check that changes the row
+	// between a read and this write cannot slip a wrong outcome through.
 	result, err := s.db.Exec(`UPDATE checkpoint_observations
-		SET outcome=?, note=?, resolved_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		WHERE session_id=? AND project_id=?`, args.Outcome, note, args.SessionID, s.projectID)
+		SET outcome=?, note=?, note_id=?, resolved_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		WHERE session_id=? AND project_id=? AND (level<>'healthy' OR ?='continued')`,
+		args.Outcome, note, noteID, args.SessionID, s.projectID, args.Outcome)
 	if err != nil {
 		return nil, checkpointOutcomeResult{}, err
 	}
@@ -228,7 +251,39 @@ func (s *server) recordCheckpointOutcome(_ context.Context, _ *mcp.CallToolReque
 		return nil, checkpointOutcomeResult{}, err
 	}
 	if n == 0 {
-		return nil, checkpointOutcomeResult{}, fmt.Errorf("checkpoint recommendation not found in this project")
+		var level string
+		err := s.db.QueryRow(`SELECT level FROM checkpoint_observations
+			WHERE session_id=? AND project_id=?`, args.SessionID, s.projectID).Scan(&level)
+		if err == nil && level == levelHealthy {
+			return nil, checkpointOutcomeResult{}, fmt.Errorf("this session's last check was healthy, with no recommendation to answer; only continued can be recorded for it")
+		}
+		return nil, checkpointOutcomeResult{}, fmt.Errorf("no checkpoint check found for this session in this project; call checkpoint_status first")
 	}
-	return nil, checkpointOutcomeResult{Recorded: true, SessionID: args.SessionID, Outcome: args.Outcome}, nil
+	return nil, checkpointOutcomeResult{Recorded: true, SessionID: args.SessionID, Outcome: args.Outcome, NoteID: args.NoteID}, nil
+}
+
+// handoffNoteID validates the note a saved_handoff names and returns the value
+// to store: the ID, or NULL when none was given. The note must be this
+// project's own. A global note or another project's note is refused, because
+// a pickup count that follows a link into someone else's notes would be
+// counting the wrong project's reads.
+func (s *server) handoffNoteID(args checkpointOutcomeArgs) (any, error) {
+	if args.NoteID == 0 {
+		return nil, nil
+	}
+	if args.Outcome != "saved_handoff" {
+		return nil, fmt.Errorf("note_id only applies to saved_handoff, not %s", args.Outcome)
+	}
+	var projectID sql.NullInt64
+	err := s.db.QueryRow(`SELECT project_id FROM notes WHERE id=?`, args.NoteID).Scan(&projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("note_id: note %d not found", args.NoteID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !projectID.Valid || projectID.Int64 != s.projectID {
+		return nil, fmt.Errorf("note_id: note %d belongs to another project", args.NoteID)
+	}
+	return args.NoteID, nil
 }

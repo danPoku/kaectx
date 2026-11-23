@@ -17,6 +17,11 @@ import (
 var windowsVolume = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
 var wslVolume = regexp.MustCompile(`^/mnt/([A-Za-z])(?:/|$)`)
 
+// msysVolume matches the drive form Git Bash (MSYS) uses on Windows: /c/x is
+// C:\x. Only a single-letter first segment counts, so /cx/repo and /home are
+// left alone. Claude Code logs this form when its Bash tool runs in Git Bash.
+var msysVolume = regexp.MustCompile(`^/([A-Za-z])(?:/|$)`)
+
 // IsAbs recognizes native, POSIX, drive-letter, and UNC absolute paths.
 func IsAbs(p string) bool {
 	p = strings.TrimSpace(p)
@@ -72,14 +77,24 @@ var driveLetter = regexp.MustCompile(`^[A-Za-z]:(?:/|$)`)
 // folder to one string:
 //   - separators become "/" and the path is cleaned;
 //   - a WSL mount (/mnt/c/x) becomes the drive it mounts (c:/x);
+//   - a Git Bash drive path (/c/x) becomes that drive too (c:/x);
 //   - a drive-letter or UNC path is lowercased, because Windows treats
 //     C:\Repo and c:\repo as the same folder.
 //
 // POSIX paths keep their case: /home/Dev and /home/dev are different folders.
 // Key is for comparison only; store the path as the agent logged it.
+//
+// The Git Bash rule costs one ambiguity: a real Linux folder named by a single
+// letter at the root (/c/repo) shares a key with drive C. Such folders are
+// rare, and the alternative, a Windows session filed under a second project
+// because its shell was Git Bash, is the bug this rule exists to prevent.
 func Key(p string) string {
 	k := CleanSlash(p)
-	if m := wslVolume.FindStringSubmatch(k); m != nil {
+	m := wslVolume.FindStringSubmatch(k)
+	if m == nil {
+		m = msysVolume.FindStringSubmatch(k)
+	}
+	if m != nil {
 		rest := strings.TrimPrefix(k[len(m[0]):], "/")
 		k = m[1] + ":"
 		if rest != "" {

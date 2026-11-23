@@ -131,7 +131,7 @@ func (s *server) registerSessions(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_session",
 		Description: "Read a session's messages in order, paged by sequence number. Returns conversation text only unless include_tools is set. Capped by total characters (max_chars) and per-message length; check `truncated` and use `next_from_seq` to continue. " +
-			"To read a search hit, pass its first_seq/last_seq as from_seq/to_seq rather than paging from 0, and the search's run_id and the hit's rank to record the open; the result's next_step is then the call that labels it.",
+			"To read a search hit, pass its first_seq/last_seq as from_seq/to_seq rather than paging from 0, and the search's run_id and the hit's rank to record the open; the result's next_step is then the call that labels it. A session from another project can be read only with the run_id and rank of a hit in it from a scope=all search.",
 	}, s.getSession)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -189,6 +189,11 @@ func (s *server) getSession(_ context.Context, _ *mcp.CallToolRequest, args getS
 	if (args.RunID != "") != (args.Rank > 0) {
 		return nil, getSessionResult{}, fmt.Errorf("pass run_id and rank together, or neither")
 	}
+	// Another project's session is readable only on the strength of a hit in
+	// it from an all-projects search of ours; see hitProject. The whole
+	// session is then open to paging, because the reason to open a session
+	// rather than the chunk is to read around the hit.
+	readProject := s.hitProject(args.RunID, args.Rank, `rc.session_id=?`, args.SessionID)
 	fromSeq := args.FromSeq
 	toSeq := args.ToSeq
 	// explicitRange: the caller named a range that fits under the row cap.
@@ -216,7 +221,7 @@ func (s *server) getSession(_ context.Context, _ *mcp.CallToolRequest, args getS
 		return nil, getSessionResult{}, err
 	}
 	rows, err := s.db.Query(sqlText,
-		sql.Named("session_id", args.SessionID), sql.Named("project_id", s.projectID),
+		sql.Named("session_id", args.SessionID), sql.Named("project_id", readProject),
 		sql.Named("from_seq", fromSeq), sql.Named("to_seq", toSeq),
 		sql.Named("include_tools", includeTools))
 	if err != nil {
@@ -269,7 +274,7 @@ func (s *server) getSession(_ context.Context, _ *mcp.CallToolRequest, args getS
 		if err != nil {
 			return nil, getSessionResult{}, err
 		}
-		if err := s.db.QueryRow(q, sql.Named("session_id", args.SessionID), sql.Named("project_id", s.projectID),
+		if err := s.db.QueryRow(q, sql.Named("session_id", args.SessionID), sql.Named("project_id", readProject),
 			sql.Named("after_seq", toSeq), sql.Named("include_tools", includeTools)).Scan(&next); err != nil {
 			return nil, getSessionResult{}, err
 		}
@@ -321,7 +326,7 @@ func (s *server) absentError(queryName, param, what string, id any) error {
 	case !owner.Valid:
 		return fmt.Errorf("%s %v is not filed under any project, so no project's tools can read it", what, id)
 	default:
-		return fmt.Errorf("%s %v belongs to another project, %s (id %d); ctx tools read only the project this server was started in",
+		return fmt.Errorf("%s %v belongs to another project, %s (id %d); ctx tools read only the project this server was started in, unless you pass the run_id and rank of a search_context hit from a scope=all search that returned it",
 			what, id, name.String, owner.Int64)
 	}
 }
