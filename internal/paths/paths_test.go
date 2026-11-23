@@ -40,11 +40,11 @@ func TestRelIfWithinAcrossPathStyles(t *testing.T) {
 
 func TestKeyMatchesEverySpellingOfOneFolder(t *testing.T) {
 	cases := []struct{ name, in, want string }{
-		{"windows", `C:\Users\kojog\NIORA`, "c:/users/kojog/niora"},
-		{"lowercase drive", `c:\Users\kojog\NIORA`, "c:/users/kojog/niora"},
-		{"forward slashes", `C:/Users/kojog/NIORA/`, "c:/users/kojog/niora"},
-		{"wsl mount", "/mnt/c/Users/kojog/NIORA", "c:/users/kojog/niora"},
-		{"wsl mount upper", "/mnt/C/Users/kojog/NIORA", "c:/users/kojog/niora"},
+		{"windows", `C:\Users\dev\REPO`, "c:/users/dev/repo"},
+		{"lowercase drive", `c:\Users\dev\REPO`, "c:/users/dev/repo"},
+		{"forward slashes", `C:/Users/dev/REPO/`, "c:/users/dev/repo"},
+		{"wsl mount", "/mnt/c/Users/dev/REPO", "c:/users/dev/repo"},
+		{"wsl mount upper", "/mnt/C/Users/dev/REPO", "c:/users/dev/repo"},
 		{"drive root", `C:\`, "c:"},
 		{"wsl drive root", "/mnt/c", "c:"},
 		{"unc", `\\Server\Share\Repo`, "//server/share/repo"},
