@@ -187,7 +187,7 @@ If some session logs haven't been ingested yet, it says so on stderr.
 
 After upgrading from an older version, run these once (add `--dry-run` to see
 what they would do first). Each is safe to repeat and runs in a single
-transaction. `messages` and `projects` read only what is already in the
+transaction. `messages`, `projects` and `notes` read only what is already in the
 database; `touches` and `git` also read the sessions' git repositories:
 
 - `ctx repair touches` rebuilds file records for Codex `apply_patch` calls
@@ -203,6 +203,13 @@ database; `touches` and `git` also read the sessions' git repositories:
   timestamps and rewrites older working-directory-relative file paths to be
   repo-root-relative. Rows whose directory no longer exists are retried on the
   next run.
+- `ctx repair notes` links each saved note to the exchange it was saved in,
+  by finding its `save_note` call in the messages already stored. Notes saved
+  from now on are linked when their session is ingested; this fills the link
+  for notes saved before. A call is matched on the note's ID and its title, so
+  a log from another machine cannot claim a note here. Only Claude Code logs
+  are read: Codex calls MCP tools through a script, and no Codex log with a
+  `save_note` call existed to read the shape from.
 - `ctx repair projects` re-files Claude Code sessions under the project their
   main transcript starts in. Older versions let a subagent transcript, which
   reuses its parent's session id, choose the project, so a session could land
@@ -314,7 +321,7 @@ a new chat.
 | `sessions_touching` | Sessions that read or edited a given file. |
 | `explain_file` | Builds a compact briefing for a file: sessions that touched it, actions, known git commit span, and chunk ids to open for the reasoning behind the work. |
 | `save_note` | Records a decision, gotcha, convention, todo, or fact. Pass `supersedes` with the ID of an earlier note in this project to retire it in the same step: the result echoes it as `superseded`, and `search_notes` stops returning it. A `supersedes` that names a missing note, another project's note, or a note already superseded is an error and saves nothing; the error names the live successor where there is one. |
-| `search_notes` | Searches saved notes. Returns current notes only; a note retired with `supersedes` is kept as history but not returned. Each call that returns notes is recorded, with the notes it returned in rank order, under the `run_id` in the result. |
+| `search_notes` | Searches saved notes. Returns current notes only; a note retired with `supersedes` is kept as history but not returned. Each call that returns notes is recorded, with the notes it returned in rank order, under the `run_id` in the result. A note whose source is known also carries `session_id`, `anchor_seq` (the first message of the exchange it was saved in) and `next_step`, the call that opens that exchange; all three are absent when the source is unknown. |
 | `record_retrieval_outcome` | Labels retrieved evidence as helpful, unhelpful, stale, incorrect or superseded. Pass the exact search run ID and rank returned by `search_context` or `get_chunk`. A label on a hit from another project counts toward that project's evidence, not the caller's. |
 | `record_search_outcome` | Records whether a search as a whole answered the question (helpful, partial or unhelpful) and, when it fell short, why (`wrong_project`, `not_indexed`, `stale_state`, `ranking`). Pass the search's run ID. Meant for every search: one answered by its snippets alone, with nothing opened, is `helpful`. Never changes a result's reliability; a second call for the same search replaces the first. |
 | `checkpoint_status` | Assesses the latest session's message count, active time and file breadth. Active time (`duration_minutes`) is the sum of the gaps between consecutive messages, leaving out gaps over 30 minutes, so a session resumed days later is not days long. When a threshold is reached the level is `checkpoint_recommended`, and `checkpoint_strongly_recommended` only once an urgent threshold is crossed; the agent is instructed to offer a durable handoff and a fresh session, and ctx never switches or ends the session automatically. Every check is stored, healthy ones included, one row per session. Pass `session_id` to assess a specific session. `pending_feedback` lists up to 10 opened results still waiting for an outcome, and `pending_searches` up to 10 searches served by this `ctx mcp` process that have no whole-search outcome yet. |
@@ -413,7 +420,7 @@ first_seq and last_seq rather than paging from the start.
 | `ctx search <query> [--agent A] [--limit N] [--since D] [--until D] [--risk-aware] [--all-projects]` | Search the current project, or every project with `--all-projects`. `--risk-aware` reranks using recorded retrieval outcomes. Output starts with the search's run ID and numbers each hit. |
 | `ctx feedback <run_id> <rank> <outcome> [--note TEXT]` | Label a `ctx search` hit as helpful, unhelpful, stale, incorrect or superseded, the CLI counterpart of `record_retrieval_outcome`. A second label for the same hit replaces the first. |
 | `ctx explain <path> [--limit N]` | Show sessions, actions and git span for a project-relative file. |
-| `ctx repair git\|touches\|messages\|projects [--dry-run]` | Bring data ingested by older versions up to date (see [Quick start](#quick-start)). |
+| `ctx repair git\|touches\|messages\|projects\|notes [--dry-run]` | Bring data ingested by older versions up to date (see [Quick start](#quick-start)). |
 | `ctx project list` | Show projects, their remotes, session counts and known paths. |
 | `ctx project merge <from> <into>` | Fold one project into another. |
 | `ctx audit-secrets` | Re-scan stored text with the current redaction rules and report rows and rule names (never the matched text). Exits non-zero on findings. Changes nothing. |

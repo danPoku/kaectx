@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/danPoku/kaectx/internal/notelink"
 	"github.com/danPoku/kaectx/internal/redact"
 	"github.com/danPoku/kaectx/internal/store"
 )
@@ -168,6 +169,12 @@ func run(db *sql.DB, adapter Adapter, path string, git *store.GitResolver) error
 
 	for sid := range touched {
 		if err := chunkSession(db, sid); err != nil {
+			lastErr = err.Error()
+		}
+		// A note saved in this session can be tied to it now that the call
+		// is on record. Like chunking, a failure here is logged against the
+		// source and never stops the ingest.
+		if _, err := notelink.LinkSession(db, sid); err != nil {
 			lastErr = err.Error()
 		}
 	}

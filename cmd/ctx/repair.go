@@ -7,14 +7,15 @@ import (
 	"flag"
 	"fmt"
 
+	"github.com/danPoku/kaectx/internal/notelink"
 	"github.com/danPoku/kaectx/internal/repair"
 	"github.com/danPoku/kaectx/internal/store"
 )
 
-const repairUsage = "usage: ctx repair git|touches|messages|projects [--dry-run]"
+const repairUsage = "usage: ctx repair git|touches|messages|projects|notes [--dry-run]"
 
 func runRepair(args []string) error {
-	if len(args) == 0 || (args[0] != "git" && args[0] != "touches" && args[0] != "messages" && args[0] != "projects") {
+	if len(args) == 0 || (args[0] != "git" && args[0] != "touches" && args[0] != "messages" && args[0] != "projects" && args[0] != "notes") {
 		return fmt.Errorf(repairUsage)
 	}
 	kind := args[0]
@@ -33,6 +34,14 @@ func runRepair(args []string) error {
 	}
 	defer db.Close()
 
+	if kind == "notes" {
+		res, err := notelink.Backfill(db, *dryRun)
+		if err != nil {
+			return err
+		}
+		fmt.Print(formatNoteLinks(res, *dryRun))
+		return nil
+	}
 	if kind == "projects" {
 		res, err := repair.Projects(db, *dryRun)
 		if err != nil {
@@ -65,6 +74,18 @@ func runRepair(args []string) error {
 	}
 	fmt.Print(formatRepair(res, *dryRun))
 	return nil
+}
+
+// formatNoteLinks reports a note-source backfill. "Matched no note" is spelled
+// out because it is expected, not an error: a log from another machine holds
+// save_note calls for notes this catalogue never had.
+func formatNoteLinks(r notelink.Result, dryRun bool) string {
+	verb := "linked"
+	if dryRun {
+		verb = "would link"
+	}
+	return fmt.Sprintf("read %d save_note calls from stored messages\nnotes: %s %d to the exchange they were saved in (%d already linked, %d calls matched no note here)\n",
+		r.Calls, verb, r.Linked, r.AlreadyLinked, r.Unmatched)
 }
 
 func formatMessages(r repair.MessagesResult, dryRun bool) string {

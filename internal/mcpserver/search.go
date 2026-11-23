@@ -90,6 +90,14 @@ type noteHit struct {
 	Tags      []string `json:"tags,omitempty"`
 	Agent     string   `json:"agent,omitempty"`
 	CreatedAt string   `json:"created_at"`
+	// SessionID and AnchorSeq are where the note was saved: the session, and
+	// the first message of the exchange. They are omitted when the source is
+	// unknown. AnchorSeq is a pointer because 0 is a real message number.
+	SessionID string `json:"session_id,omitempty"`
+	AnchorSeq *int   `json:"anchor_seq,omitempty"`
+	// NextStep is the call that opens that exchange, so an agent that finds a
+	// decision can read the conversation behind it, not just the rule.
+	NextStep string `json:"next_step,omitempty"`
 }
 
 type searchNotesResult struct {
@@ -113,7 +121,7 @@ func (s *server) registerSearch(srv *mcp.Server) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "search_notes",
-		Description: "Search notes — decisions, gotchas, conventions, and todos deliberately recorded with save_note. Distinct from search_context: notes are curated policy an agent chose to write down, not raw transcript.",
+		Description: "Search notes — decisions, gotchas, conventions, and todos deliberately recorded with save_note. Distinct from search_context: notes are curated policy an agent chose to write down, not raw transcript. A note whose source is known carries session_id, anchor_seq and a next_step: make that call to read the conversation the note was saved in.",
 	}, s.searchNotes)
 }
 
@@ -165,6 +173,17 @@ func getChunkCall(chunkID int64, runID string, rank int) string {
 	return fmt.Sprintf("get_chunk(chunk_id=%d, run_id=%q, rank=%d)", chunkID, runID, rank)
 }
 
+// noteSourceCall writes the call that opens the exchange a note was saved in.
+// Normally that is get_chunk on the chunk holding the anchor. An exchange too
+// recent to have been chunked has no chunk id yet, so the call falls back to
+// reading the session from the anchor on.
+func noteSourceCall(r search.NoteResult) string {
+	if r.SourceChunkID != 0 {
+		return fmt.Sprintf("get_chunk(chunk_id=%d)", r.SourceChunkID)
+	}
+	return fmt.Sprintf("get_session(session_id=%q, from_seq=%d)", r.SessionID, r.AnchorSeq)
+}
+
 func (s *server) searchNotes(_ context.Context, _ *mcp.CallToolRequest, args searchNotesArgs) (*mcp.CallToolResult, searchNotesResult, error) {
 	limit := args.Limit
 	if limit <= 0 {
@@ -181,6 +200,11 @@ func (s *server) searchNotes(_ context.Context, _ *mcp.CallToolRequest, args sea
 		out.Notes[i] = noteHit{
 			ID: r.ID, Kind: r.Kind, Title: r.Title, Body: r.Body,
 			Tags: r.Tags, Agent: r.Agent, CreatedAt: r.CreatedAt,
+		}
+		if r.HasSource {
+			anchor := r.AnchorSeq
+			out.Notes[i].SessionID, out.Notes[i].AnchorSeq = r.SessionID, &anchor
+			out.Notes[i].NextStep = noteSourceCall(r)
 		}
 	}
 	return nil, out, nil

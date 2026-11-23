@@ -11,6 +11,7 @@ import (
 
 	"github.com/danPoku/kaectx/internal/doctor"
 	"github.com/danPoku/kaectx/internal/explain"
+	"github.com/danPoku/kaectx/internal/notelink"
 	"github.com/danPoku/kaectx/internal/repair"
 )
 
@@ -192,5 +193,21 @@ func TestGitLineWithoutABranchKeepsItsIndentAndSpacing(t *testing.T) {
 	line := gitLine(explain.Session{StartingCommit: "abc", EndingCommit: "def"})
 	if line != "  git: abc..def" {
 		t.Errorf("line = %q", line)
+	}
+}
+
+func TestFormatNoteLinks(t *testing.T) {
+	r := notelink.Result{Calls: 9, Linked: 6, AlreadyLinked: 2, Unmatched: 1}
+	for _, c := range []struct {
+		dryRun bool
+		want   string
+	}{
+		{false, "notes: linked 6 to the exchange they were saved in (2 already linked, 1 calls matched no note here)"},
+		{true, "notes: would link 6 to the exchange they were saved in (2 already linked, 1 calls matched no note here)"},
+	} {
+		out := formatNoteLinks(r, c.dryRun)
+		if !strings.Contains(out, "read 9 save_note calls") || !strings.Contains(out, c.want) {
+			t.Errorf("formatNoteLinks(dryRun=%v) = %q, want it to contain %q", c.dryRun, out, c.want)
+		}
 	}
 }

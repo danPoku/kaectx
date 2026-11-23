@@ -167,9 +167,9 @@ func TestMigrateTwiceIsANoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	want := 16 // core, session_git, touch_rooted, commit_source, retrieval telemetry/outcomes/governance/opens/observer/inferred opens, evidence anchors, open events, run observations, checkpoint checks, note retrievals, candidate project
+	want := 17 // core, session_git, touch_rooted, commit_source, retrieval telemetry/outcomes/governance/opens/observer/inferred opens, evidence anchors, open events, run observations, checkpoint checks, note retrievals, candidate project, note anchor
 	if first.VectorsLoaded {
-		want = 17
+		want = 18
 	}
 
 	var count int
