@@ -30,6 +30,8 @@ type server struct {
 	cwd         string
 	embedClient embed.Embedder
 	catchUp     *catchUp // nil unless Options.Roots was set
+	// served is the searches this process answered; see servedRuns.
+	served servedRuns
 }
 
 // Options configures the parts of the server that reach outside the
@@ -71,7 +73,7 @@ func NewWithOptions(db *sql.DB, cwd string, embedClient embed.Embedder, opts Opt
 	}
 
 	srv := mcp.NewServer(&mcp.Implementation{Name: "ctx", Version: "0.2.0+dev"}, &mcp.ServerOptions{
-		Instructions: "Use ctx to recover prior work without loading whole transcripts. Use search_context then get_chunk for the smallest useful context: each hit's next_step is the exact get_chunk call, with the run_id and rank that record the exact open. When retrieved context influences an answer or action, call record_retrieval_outcome with that run ID and rank and an honest outcome; an open alone is never a helpful label. If the search as a whole missed context you needed, also call record_search_outcome with a reason. At natural milestones call feedback_status and checkpoint_status. If checkpoint_status recommends a checkpoint, tell the user and offer to save a handoff before continuing in a fresh session; never end or replace the session without the user's choice, and record that choice with record_checkpoint_outcome.",
+		Instructions: "Use ctx to recover prior work without loading whole transcripts. Use search_context then get_chunk for the smallest useful context: each hit's next_step is the exact get_chunk call, with the run_id and rank that record the exact open. When retrieved context influences an answer or action, call record_retrieval_outcome with that run ID and rank and an honest outcome; an open alone is never a helpful label. Every search also deserves one whole-search verdict: make the call in its outcome_next_step with helpful when the search answered the question (its snippets alone count), or partial or unhelpful with a reason when it missed context you needed. feedback_status and checkpoint_status list the searches still waiting as pending_searches. At natural milestones call feedback_status and checkpoint_status. If checkpoint_status recommends a checkpoint, tell the user and offer to save a handoff before continuing in a fresh session; never end or replace the session without the user's choice, and record that choice with record_checkpoint_outcome.",
 	})
 	s.registerSearch(srv)
 	s.registerChunk(srv)
