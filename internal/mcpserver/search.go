@@ -21,6 +21,7 @@ type searchContextArgs struct {
 	RiskAware bool   `json:"risk_aware,omitempty" jsonschema:"rerank using retrieval outcomes once evidence is credible (default false)"`
 	Since     string `json:"since,omitempty" jsonschema:"only turns at or after this time: a UTC date (2026-09-28) or RFC 3339 timestamp"`
 	Until     string `json:"until,omitempty" jsonschema:"only turns before this time; a date means through the end of that day (2026-10-04)"`
+	Scope     string `json:"scope,omitempty" jsonschema:"project (default) searches this project; all searches every project on this machine, for work that spans repos"`
 }
 
 type searchContextHit struct {
@@ -40,6 +41,9 @@ type searchContextHit struct {
 	PolicyScore       float64 `json:"policy_score,omitempty"`
 	GovernanceNeutral bool    `json:"governance_neutral,omitempty"`
 	OriginalRank      int     `json:"original_rank,omitempty"`
+	// Project is the name of the project the hit came from. It matters under
+	// scope=all, where hits from several repos sit side by side.
+	Project string `json:"project,omitempty"`
 	// NextStep is the exact get_chunk call for this hit, run_id and rank
 	// included. Agents copy a call from a result far more reliably than they
 	// assemble one from a tool description, and without run_id and rank the
@@ -103,6 +107,7 @@ func (s *server) registerSearch(srv *mcp.Server) {
 			"Returns short snippets, not full transcripts. To read a hit, make the call in its next_step: get_chunk with its chunk_id, the result's run_id and the hit's rank (the matching exchange, ~1k tokens). Or call get_session with its session_id, from_seq/to_seq set to the hit's first_seq/last_seq, and the same run_id and rank. " +
 			"For questions about a period (\"what happened last week\"), set since/until: otherwise older, stronger matches outrank the period you asked about. " +
 			"If the result's index.warning is set, ctx has not read some recent logs yet; say so rather than concluding nothing happened. " +
+			"When the work spans more than one repo (an API and its frontend, say) and this project's sessions do not hold the answer, set scope to all: every project is searched and each hit names its project. A hit from another project can be read only through its next_step, which carries the run_id and rank that authorise it. " +
 			"Once you know whether the search answered your question, make the call in outcome_next_step. A search answered by its snippets alone, with nothing opened, is helpful; one that returned nothing useful is unhelpful, with the reason.",
 	}, s.searchContext)
 
@@ -121,7 +126,15 @@ func (s *server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, args
 	if err != nil {
 		return nil, searchContextResult{}, err
 	}
-	got, err := search.BestTrackedIn(ctx, s.db, s.embedClient, args.Query, s.projectID, args.Agent, w, limit, "mcp", args.RiskAware)
+	scope := search.Scope{ProjectID: s.projectID}
+	switch args.Scope {
+	case "", "project":
+	case "all":
+		scope.AllProjects = true
+	default:
+		return nil, searchContextResult{}, fmt.Errorf("scope must be project or all, not %q", args.Scope)
+	}
+	got, err := search.BestTrackedScoped(ctx, s.db, s.embedClient, args.Query, scope, args.Agent, w, limit, "mcp", args.RiskAware)
 	if err != nil {
 		return nil, searchContextResult{}, err
 	}
@@ -135,6 +148,7 @@ func (s *server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, args
 			FirstSeq: r.FirstSeq, LastSeq: r.LastSeq,
 			Reliability: r.Reliability, PolicyScore: r.PolicyScore, GovernanceNeutral: r.GovernanceNeutral,
 			OriginalRank: r.OriginalRank,
+			Project:      r.ProjectName,
 			NextStep:     getChunkCall(r.ChunkID, got.RunID, i+1),
 		}
 	}

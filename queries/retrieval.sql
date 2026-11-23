@@ -4,7 +4,13 @@
 -- from these, but they're plain SQL you can paste into the sqlite3 shell.
 --
 -- Scoping rule used everywhere:
---   :project_id  -> required for project scope; the app omits it for cross-project
+--   :project_id  -> the caller's project
+--   :all_projects -> search only: 0 = the caller's project, 1 = every project
+--                    (sessions filed under no project are left out: a hit has
+--                    to name the project it came from). The vec0 KNN filter
+--                    cannot take a parameter-driven OR, so its project line is
+--                    marked "scope:project" and the app drops that one line
+--                    for :all_projects = 1; see search.loadHybridQuery.
 --   :agent       -> NULL = cross-agent (everyone's files), 'codex' = within-agent
 --   :since/:until -> NULL = no bound; otherwise ISO-8601 UTC, since inclusive,
 --                    until exclusive. Search applies them to WHEN THE TURN
@@ -34,12 +40,15 @@ SELECT c.id                                       AS chunk_id,
                  WHERE m.session_id = c.session_id
                    AND m.seq BETWEEN c.first_seq AND c.last_seq),
                 s.started_at)
-                                                   AS chunk_at   -- when THIS turn happened; started_at is the session's start
+                                                   AS chunk_at,  -- when THIS turn happened; started_at is the session's start
+       s.project_id,                               -- the hit's own project: differs from :project_id only under :all_projects
+       COALESCE(p.name, '')                        AS project_name
   FROM chunks_fts
   JOIN chunks   c ON c.id = chunks_fts.rowid
   JOIN sessions s ON s.id = c.session_id
+  LEFT JOIN projects p ON p.id = s.project_id
  WHERE chunks_fts MATCH :query
-   AND s.project_id = :project_id
+   AND (s.project_id = :project_id OR (:all_projects = 1 AND s.project_id IS NOT NULL))
    AND (:agent IS NULL OR s.agent = :agent)
    AND (:since IS NULL OR julianday(COALESCE(s.ended_at, s.started_at)) >= julianday(:since))
    AND (:until IS NULL OR julianday(s.started_at) < julianday(:until))
@@ -74,7 +83,7 @@ WITH kw AS (
       JOIN chunks   c ON c.id = chunks_fts.rowid
       JOIN sessions s ON s.id = c.session_id
      WHERE chunks_fts MATCH :query
-       AND s.project_id = :project_id
+       AND (s.project_id = :project_id OR (:all_projects = 1 AND s.project_id IS NOT NULL))
        AND (:since IS NULL OR julianday(COALESCE(s.ended_at, s.started_at)) >= julianday(:since))
        AND (:until IS NULL OR julianday(s.started_at) < julianday(:until))
        AND ((:since IS NULL AND :until IS NULL) OR EXISTS (
@@ -101,10 +110,12 @@ sem AS (
               FROM chunk_vectors
              WHERE embedding MATCH :query_embedding   -- JSON array or float32 blob
                AND k = :sem_k
-               AND project_id = :project_id) v
+               AND project_id = :project_id   -- scope:project
+           ) v
       JOIN chunks   c ON c.id = v.chunk_id
       JOIN sessions s ON s.id = c.session_id
      WHERE v.distance <= :max_distance
+       AND (:all_projects = 0 OR s.project_id IS NOT NULL)
        AND (:since IS NULL OR julianday(COALESCE(s.ended_at, s.started_at)) >= julianday(:since))
        AND (:until IS NULL OR julianday(s.started_at) < julianday(:until))
        AND ((:since IS NULL AND :until IS NULL) OR EXISTS (
@@ -133,10 +144,13 @@ SELECT f.chunk_id,
                  WHERE m.session_id = c.session_id
                    AND m.seq BETWEEN c.first_seq AND c.last_seq),
                 s.started_at)
-                              AS chunk_at
+                              AS chunk_at,
+       s.project_id,
+       COALESCE(p.name, '') AS project_name
   FROM fused f
   JOIN chunks   c ON c.id = f.chunk_id
   JOIN sessions s ON s.id = c.session_id
+  LEFT JOIN projects p ON p.id = s.project_id
  ORDER BY f.score DESC, chunk_at DESC   -- RRF ties are common (same rank in one list); newer wins
  LIMIT :limit;
 
@@ -155,7 +169,7 @@ WITH kw AS (
       JOIN chunks   c ON c.id = chunks_fts.rowid
       JOIN sessions s ON s.id = c.session_id
      WHERE chunks_fts MATCH :query
-       AND s.project_id = :project_id
+       AND (s.project_id = :project_id OR (:all_projects = 1 AND s.project_id IS NOT NULL))
        AND s.agent = :agent
        AND (:since IS NULL OR julianday(COALESCE(s.ended_at, s.started_at)) >= julianday(:since))
        AND (:until IS NULL OR julianday(s.started_at) < julianday(:until))
@@ -180,11 +194,12 @@ sem AS (
               FROM chunk_vectors
              WHERE embedding MATCH :query_embedding   -- JSON array or float32 blob
                AND k = :sem_k
-               AND project_id = :project_id
+               AND project_id = :project_id   -- scope:project
                AND agent = :agent) v
       JOIN chunks   c ON c.id = v.chunk_id
       JOIN sessions s ON s.id = c.session_id
      WHERE v.distance <= :max_distance
+       AND (:all_projects = 0 OR s.project_id IS NOT NULL)
        AND (:since IS NULL OR julianday(COALESCE(s.ended_at, s.started_at)) >= julianday(:since))
        AND (:until IS NULL OR julianday(s.started_at) < julianday(:until))
        AND ((:since IS NULL AND :until IS NULL) OR EXISTS (
@@ -213,10 +228,13 @@ SELECT f.chunk_id,
                  WHERE m.session_id = c.session_id
                    AND m.seq BETWEEN c.first_seq AND c.last_seq),
                 s.started_at)
-                              AS chunk_at
+                              AS chunk_at,
+       s.project_id,
+       COALESCE(p.name, '') AS project_name
   FROM fused f
   JOIN chunks   c ON c.id = f.chunk_id
   JOIN sessions s ON s.id = c.session_id
+  LEFT JOIN projects p ON p.id = s.project_id
  ORDER BY f.score DESC, chunk_at DESC   -- RRF ties are common (same rank in one list); newer wins
  LIMIT :limit;
 

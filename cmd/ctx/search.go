@@ -19,7 +19,7 @@ import (
 
 // searchFlagsWithValue lists this command's flags and whether they take a
 // value, so reorderFlagsFirst can hoist them ahead of the query words.
-var searchFlagsWithValue = map[string]bool{"agent": true, "limit": true, "risk-aware": false, "since": true, "until": true}
+var searchFlagsWithValue = map[string]bool{"agent": true, "limit": true, "risk-aware": false, "since": true, "until": true, "all-projects": false}
 
 func runSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
@@ -28,11 +28,12 @@ func runSearch(args []string) error {
 	riskAware := fs.Bool("risk-aware", false, "rerank using credible retrieval outcomes")
 	since := fs.String("since", "", "only turns at or after this UTC date (2026-09-28) or RFC 3339 time")
 	until := fs.String("until", "", "only turns before this time; a date means through the end of that day")
+	allProjects := fs.Bool("all-projects", false, "search every project, not only the one containing the current directory")
 	if err := fs.Parse(reorderFlagsFirst(args, searchFlagsWithValue)); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: ctx search <query> [--agent NAME] [--limit N] [--since DATE] [--until DATE] [--risk-aware]")
+		return fmt.Errorf("usage: ctx search <query> [--agent NAME] [--limit N] [--since DATE] [--until DATE] [--risk-aware] [--all-projects]")
 	}
 	query := strings.Join(fs.Args(), " ")
 	window, err := search.ParseWindow(*since, *until)
@@ -59,7 +60,8 @@ func runSearch(args []string) error {
 	// its own — cheap to always offer a client here, since Hybrid only
 	// actually reaches Ollama if vec0 (and chunk_vectors) are usable at all.
 	client := embed.NewOllamaClient(embed.DefaultBaseURL, embed.DefaultModel)
-	got, err := search.BestTrackedIn(context.Background(), db, client, query, projectID, *agent, window, *limit, "cli", *riskAware)
+	scope := search.Scope{ProjectID: projectID, AllProjects: *allProjects}
+	got, err := search.BestTrackedScoped(context.Background(), db, client, query, scope, *agent, window, *limit, "cli", *riskAware)
 	if err != nil {
 		return err
 	}
@@ -80,15 +82,16 @@ func runSearch(args []string) error {
 				f.PendingFiles, f.OldestPendingAt)
 		}
 	}
-	fmt.Print(formatSearch(got))
+	fmt.Print(formatSearch(got, *allProjects))
 	return nil
 }
 
 // formatSearch prints a search's hits. When the search was recorded, it leads
 // with the run ID and numbers each hit, which is what `ctx feedback` needs to
 // label one. When telemetry failed there is no run to label, so neither the
-// run line nor the ranks appear.
-func formatSearch(got search.BestResult) string {
+// run line nor the ranks appear. showProject adds each hit's project name,
+// for an all-projects search where hits from several repos are mixed.
+func formatSearch(got search.BestResult, showProject bool) string {
 	if len(got.Results) == 0 {
 		return "no results\n"
 	}
@@ -100,6 +103,9 @@ func formatSearch(got search.BestResult) string {
 	for i, r := range got.Results {
 		if labellable {
 			fmt.Fprintf(&b, "#%d ", i+1)
+		}
+		if showProject {
+			fmt.Fprintf(&b, "(%s) ", r.ProjectName)
 		}
 		fmt.Fprintf(&b, "[%s] %s  %s  seq %d-%d\n    %s\n\n", r.Agent, r.At, r.SessionID, r.FirstSeq, r.LastSeq, r.Snippet)
 	}
