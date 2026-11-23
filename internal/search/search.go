@@ -14,6 +14,27 @@ import (
 	"github.com/danPoku/kaectx/queries"
 )
 
+// Scope says whose sessions a search covers. The zero value of AllProjects is
+// the long-standing default: the caller's project only.
+//
+// ProjectID is always the caller's project, even when AllProjects is set: the
+// search is still run on that project's behalf, and its telemetry is filed
+// there. Like a branch manager asking head office to check every branch's
+// files: the request, and the record of it, still belong to the asking branch.
+type Scope struct {
+	ProjectID   int64
+	AllProjects bool
+}
+
+// args returns the SQL parameters every search query takes for scoping.
+func (sc Scope) args() []any {
+	all := 0
+	if sc.AllProjects {
+		all = 1
+	}
+	return []any{sql.Named("project_id", sc.ProjectID), sql.Named("all_projects", all)}
+}
+
 // KeywordResult is one row of SearchKeyword's result set.
 type KeywordResult struct {
 	ChunkID   int64
@@ -30,6 +51,10 @@ type KeywordResult struct {
 	// falling back to the session start. StartedAt is the SESSION's start,
 	// which is the same for every chunk in a long session.
 	At string
+	// ProjectID and ProjectName are the hit's own project. They differ from
+	// the caller's only when the search ran with Scope.AllProjects.
+	ProjectID   int64
+	ProjectName string
 }
 
 // Keyword runs SearchKeyword: BM25-ranked full-text search over chunks,
@@ -40,6 +65,11 @@ func Keyword(db *sql.DB, query string, projectID int64, agent string, limit int)
 
 // KeywordIn is Keyword limited to turns inside w.
 func KeywordIn(db *sql.DB, query string, projectID int64, agent string, w Window, limit int) ([]KeywordResult, error) {
+	return KeywordScoped(db, query, Scope{ProjectID: projectID}, agent, w, limit)
+}
+
+// KeywordScoped is KeywordIn over a Scope: one project, or all of them.
+func KeywordScoped(db *sql.DB, query string, scope Scope, agent string, w Window, limit int) ([]KeywordResult, error) {
 	sqlText, err := store.LoadQuery(queries.FS, "retrieval.sql", "SearchKeyword")
 	if err != nil {
 		return nil, err
@@ -50,12 +80,11 @@ func KeywordIn(db *sql.DB, query string, projectID int64, agent string, w Window
 		agentArg = agent
 	}
 
-	rows, err := db.Query(sqlText, append([]any{
+	rows, err := db.Query(sqlText, append(append([]any{
 		sql.Named("query", sanitizeFTS5Query(query)),
-		sql.Named("project_id", projectID),
 		sql.Named("agent", agentArg),
 		sql.Named("limit", limit),
-	}, w.Args()...)...)
+	}, scope.args()...), w.Args()...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +93,7 @@ func KeywordIn(db *sql.DB, query string, projectID int64, agent string, w Window
 	var results []KeywordResult
 	for rows.Next() {
 		var r KeywordResult
-		if err := rows.Scan(&r.ChunkID, &r.SessionID, &r.Agent, &r.StartedAt, &r.Snippet, &r.BM25, &r.FirstSeq, &r.LastSeq, &r.At); err != nil {
+		if err := rows.Scan(&r.ChunkID, &r.SessionID, &r.Agent, &r.StartedAt, &r.Snippet, &r.BM25, &r.FirstSeq, &r.LastSeq, &r.At, &r.ProjectID, &r.ProjectName); err != nil {
 			return nil, err
 		}
 		results = append(results, r)

@@ -58,7 +58,8 @@ func (s *server) registerChunk(srv *mcp.Server) {
 		Name: "get_chunk",
 		Description: "Read one search hit in full: the user turn and the assistant's reply it belongs to (~1k tokens), by chunk_id from search_context. " +
 			"Pass that result's run_id and rank together to record that exact result as opened; with chunk_id alone the open is attributed to the latest search that returned it, unless two recent searches did. " +
-			"The result's next_step is the call that labels the hit once you know whether it helped. Use get_session only when you need the messages around it.",
+			"The result's next_step is the call that labels the hit once you know whether it helped. Use get_session only when you need the messages around it. " +
+			"A chunk from another project can be read only with the run_id and rank of the scope=all search hit that returned it.",
 	}, s.getChunk)
 }
 
@@ -73,8 +74,12 @@ func (s *server) getChunk(_ context.Context, _ *mcp.CallToolRequest, args getChu
 	if err != nil {
 		return nil, getChunkResult{}, err
 	}
+	// Normally this project's own. It is another project's only when run_id
+	// and rank name a hit that an all-projects search of ours returned for
+	// this very chunk; see hitProject.
+	readProject := s.hitProject(args.RunID, args.Rank, `rc.chunk_id=?`, args.ChunkID)
 	var out getChunkResult
-	err = s.db.QueryRow(sqlText, sql.Named("chunk_id", args.ChunkID), sql.Named("project_id", s.projectID)).
+	err = s.db.QueryRow(sqlText, sql.Named("chunk_id", args.ChunkID), sql.Named("project_id", readProject)).
 		Scan(&out.ChunkID, &out.SessionID, &out.Agent, &out.FirstSeq, &out.LastSeq, &out.Text, &out.At)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := s.absentError("ChunkOwner", "chunk_id", "chunk", args.ChunkID); err != nil {
@@ -108,6 +113,39 @@ func (s *server) getChunk(_ context.Context, _ *mcp.CallToolRequest, args getChu
 		out.NextStep = labelStep(*out.FeedbackTarget)
 	}
 	return nil, out, nil
+}
+
+// hitProject returns the project a read should be scoped to: this server's
+// own, unless runID and rank name a search hit that
+//   - belongs to a search this project ran (so the caller really was shown it),
+//   - was recorded as coming from another project (only a scope=all search
+//     records that), and
+//   - satisfies match, a condition on the candidate (alias rc) tying it to the
+//     thing being read: the same chunk for get_chunk, the same session for
+//     get_session.
+//
+// Then it is that hit's project. This is the whole of the cross-project
+// permission: like a reader's slip from a library's inter-branch search, it
+// admits you to the one volume the search turned up, at the branch that holds
+// it, and to nothing else there. A bare chunk or session ID from another
+// project still gets the cross-project error.
+//
+// match is always a constant written in this package, never caller input. Any
+// failure to find such a hit falls back to this project, which is the safe
+// direction: the read is then refused as usual.
+func (s *server) hitProject(runID string, rank int, match string, matchArgs ...any) int64 {
+	if runID == "" || rank <= 0 {
+		return s.projectID
+	}
+	var project int64
+	err := s.db.QueryRow(`SELECT rc.project_id
+		FROM retrieval_candidates rc JOIN retrieval_runs rr ON rr.id=rc.run_id
+		WHERE rc.run_id=? AND rc.rank=? AND rr.project_id=? AND rc.project_id IS NOT NULL
+		AND (`+match+`)`, append([]any{runID, rank, s.projectID}, matchArgs...)...).Scan(&project)
+	if err != nil {
+		return s.projectID
+	}
+	return project
 }
 
 // labelStep is the labelling call for an opened hit. Asking in the result, at

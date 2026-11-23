@@ -124,6 +124,9 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := applySQLMigration(db, 14, "014_retrieval_run_observations.sql"); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := migrateCandidateProject(db); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
 }
 
@@ -223,6 +226,21 @@ func migrateInferredOpens(db *sql.DB) error {
 		[]string{`CREATE INDEX IF NOT EXISTS idx_retrieval_candidates_chunk
 			ON retrieval_candidates(chunk_id)`},
 		column{"inferred_open_count", "INTEGER NOT NULL DEFAULT 0"})
+}
+
+// migrateCandidateProject is migration 017: retrieval_candidates.project_id is
+// the project a hit came from. Until cross-project search every hit belonged
+// to its run's project, so the column was not needed; a NULL (every existing
+// row, and nothing needs backfilling) still reads that way. With an
+// all-projects search a hit can come from elsewhere, and reading it or
+// labelling it has to follow the hit, not the searcher: the label must count
+// toward the project whose evidence it judges.
+//
+// ON DELETE SET NULL, not CASCADE: the candidate is the searching project's
+// telemetry and outlives the project one of its hits pointed at.
+func migrateCandidateProject(db *sql.DB) error {
+	return addColumns(db, 17, "candidate_project", "retrieval_candidates",
+		column{"project_id", "INTEGER REFERENCES projects(id) ON DELETE SET NULL"})
 }
 
 // addColumns is the shared shape of the ALTER-based migrations. It lives in

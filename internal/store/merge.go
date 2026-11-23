@@ -75,6 +75,13 @@ func MergeProjects(db *sql.DB, from, into int64) error {
 		}
 	}
 
+	// Hits that other projects' all-projects searches found in `from` now
+	// live in `into`. Without this the delete below would null the link, and
+	// a NULL reads as "the searching project's own hit".
+	if _, err := tx.Exec(`UPDATE retrieval_candidates SET project_id = ? WHERE project_id = ?`, into, from); err != nil {
+		return fmt.Errorf("move retrieval candidates: %w", err)
+	}
+
 	// git_remote is UNIQUE, so free it on `from` (by deleting the row)
 	// before `into` can take it over.
 	if _, err := tx.Exec(`DELETE FROM projects WHERE id = ?`, from); err != nil {

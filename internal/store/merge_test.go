@@ -99,3 +99,30 @@ func TestMergeProjectsRefusals(t *testing.T) {
 		t.Errorf("projects = %d after refused merges, want 2", n)
 	}
 }
+
+// TestMergeProjectsMovesCrossProjectCandidates: a hit that an all-projects
+// search found in the merged-away project must point at the surviving one.
+// Left alone, deleting the project would null the link, and a NULL reads as
+// "the searching project's own hit".
+func TestMergeProjectsMovesCrossProjectCandidates(t *testing.T) {
+	db := migratedTestDB(t)
+	mustExec(t, db, `INSERT INTO projects(id, name) VALUES (1, 'searcher'), (2, 'worktree'), (3, 'repo')`)
+	mustExec(t, db, `INSERT INTO retrieval_runs(id, project_id, surface, query, requested_limit, mode, duration_ms, result_count)
+		VALUES ('run', 1, 'mcp', 'q', 10, 'keyword', 0, 2)`)
+	mustExec(t, db, `INSERT INTO retrieval_candidates(run_id, rank, evidence_key, session_id, first_seq, last_seq, score, score_kind, project_id) VALUES
+		('run', 1, 'a', 's-a', 0, 1, 0, 'bm25', 2),
+		('run', 2, 'b', 's-b', 0, 1, 0, 'bm25', 1)`)
+
+	if err := MergeProjects(db, 2, 3); err != nil {
+		t.Fatalf("MergeProjects: %v", err)
+	}
+	for rank, want := range map[int]int64{1: 3, 2: 1} {
+		var got sql.NullInt64
+		if err := db.QueryRow(`SELECT project_id FROM retrieval_candidates WHERE run_id = 'run' AND rank = ?`, rank).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if !got.Valid || got.Int64 != want {
+			t.Errorf("rank %d: project_id = %+v, want %d", rank, got, want)
+		}
+	}
+}
