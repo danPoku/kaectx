@@ -99,7 +99,7 @@ func (s *server) registerFeedback(srv *mcp.Server) {
 	}, s.feedbackStatus)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "record_checkpoint_outcome",
-		Description: "Record the user's response to a checkpoint recommendation. Use the exact session_id and one of started_new_session, saved_handoff, continued, or dismissed.",
+		Description: "Record the user's response to a checkpoint check. Use the exact session_id and one of started_new_session, saved_handoff, continued, or dismissed. After a healthy check, with no recommendation made, only continued applies.",
 	}, s.recordCheckpointOutcome)
 }
 
@@ -136,7 +136,8 @@ func (s *server) feedbackStatus(_ context.Context, _ *mcp.CallToolRequest, args 
 	out := feedbackStatusResult{Nudges: []feedbackNudge{}}
 
 	rows, err := s.db.Query(`SELECT session_id, level FROM checkpoint_observations
-		WHERE project_id=? AND outcome IS NULL ORDER BY recommended_at DESC LIMIT ?`, s.projectID, limit)
+		WHERE project_id=? AND outcome IS NULL AND level<>'healthy'
+		ORDER BY recommended_at DESC LIMIT ?`, s.projectID, limit)
 	if err != nil {
 		return nil, out, err
 	}
@@ -217,9 +218,14 @@ func (s *server) recordCheckpointOutcome(_ context.Context, _ *mcp.CallToolReque
 	if args.Note != "" {
 		note = redact.Redact(args.Note)
 	}
+	// A healthy check made no recommendation, so there was nothing to save,
+	// dismiss or leave: the only thing the user can have done is carry on.
+	// The level test sits in the UPDATE itself so a check that changes the row
+	// between a read and this write cannot slip a wrong outcome through.
 	result, err := s.db.Exec(`UPDATE checkpoint_observations
 		SET outcome=?, note=?, resolved_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		WHERE session_id=? AND project_id=?`, args.Outcome, note, args.SessionID, s.projectID)
+		WHERE session_id=? AND project_id=? AND (level<>'healthy' OR ?='continued')`,
+		args.Outcome, note, args.SessionID, s.projectID, args.Outcome)
 	if err != nil {
 		return nil, checkpointOutcomeResult{}, err
 	}
@@ -228,7 +234,13 @@ func (s *server) recordCheckpointOutcome(_ context.Context, _ *mcp.CallToolReque
 		return nil, checkpointOutcomeResult{}, err
 	}
 	if n == 0 {
-		return nil, checkpointOutcomeResult{}, fmt.Errorf("checkpoint recommendation not found in this project")
+		var level string
+		err := s.db.QueryRow(`SELECT level FROM checkpoint_observations
+			WHERE session_id=? AND project_id=?`, args.SessionID, s.projectID).Scan(&level)
+		if err == nil && level == levelHealthy {
+			return nil, checkpointOutcomeResult{}, fmt.Errorf("this session's last check was healthy, with no recommendation to answer; only continued can be recorded for it")
+		}
+		return nil, checkpointOutcomeResult{}, fmt.Errorf("no checkpoint check found for this session in this project; call checkpoint_status first")
 	}
 	return nil, checkpointOutcomeResult{Recorded: true, SessionID: args.SessionID, Outcome: args.Outcome}, nil
 }
