@@ -311,8 +311,8 @@ a new chat.
 | `recent_sessions` | Lists recent sessions, newest first; `since`/`until` list the sessions active in a period. |
 | `sessions_touching` | Sessions that read or edited a given file. |
 | `explain_file` | Builds a compact briefing for a file: sessions that touched it, actions, known git commit span, and chunk ids to open for the reasoning behind the work. |
-| `save_note` | Records a decision, gotcha, convention, todo, or fact. |
-| `search_notes` | Searches saved notes. |
+| `save_note` | Records a decision, gotcha, convention, todo, or fact. Pass `supersedes` with the ID of an earlier note in this project to retire it in the same step: the result echoes it as `superseded`, and `search_notes` stops returning it. A `supersedes` that names a missing note, another project's note, or a note already superseded is an error and saves nothing; the error names the live successor where there is one. |
+| `search_notes` | Searches saved notes. Returns current notes only; a note retired with `supersedes` is kept as history but not returned. |
 | `record_retrieval_outcome` | Labels retrieved evidence as helpful, unhelpful, stale, incorrect or superseded. Pass the exact search run ID and rank returned by `search_context` or `get_chunk`. |
 | `record_search_outcome` | Records whether a search as a whole answered the question (helpful, partial or unhelpful) and, when it fell short, why (`wrong_project`, `not_indexed`, `stale_state`, `ranking`). Pass the search's run ID. Never changes a result's reliability; a second call for the same search replaces the first. |
 | `checkpoint_status` | Assesses the latest session's message count, elapsed span and file breadth. When a threshold is reached, the agent is instructed to offer a durable handoff and a fresh session; ctx never switches or ends the session automatically. Pass `session_id` to assess a specific session. `pending_feedback` lists up to 10 opened results still waiting for an outcome. |
