@@ -108,6 +108,10 @@ func formatCheckpoints(r doctor.Report) string {
 		}
 		fmt.Fprintf(&b, "  %s: %s, unresolved %d\n", level, formatCounts(doctor.CheckpointOutcomes, counts), counts[""])
 	}
+	// Pickup can only be judged for handoffs that name their note, so the
+	// line says how many do rather than reporting a rate over all of them.
+	fmt.Fprintf(&b, "  handoffs saved: %d (%d linked to a note, %d of those returned by a note search within %d days)\n",
+		r.HandoffsSaved, r.HandoffsLinked, r.HandoffsPickedUp, doctor.HandoffPickupDays)
 	return b.String()
 }
 

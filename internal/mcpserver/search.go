@@ -85,6 +85,10 @@ type noteHit struct {
 
 type searchNotesResult struct {
 	Notes []noteHit `json:"notes"`
+	// RunID identifies this note search in note_retrievals. It is omitted
+	// when nothing was returned or the record could not be written; the notes
+	// themselves are returned either way.
+	RunID string `json:"run_id,omitempty"`
 }
 
 func (s *server) registerSearch(srv *mcp.Server) {
@@ -144,11 +148,13 @@ func (s *server) searchNotes(_ context.Context, _ *mcp.CallToolRequest, args sea
 	if limit <= 0 {
 		limit = defaultSearchLimit
 	}
-	rows, err := search.Notes(s.db, args.Query, s.projectID, limit)
+	// The telemetry error is dropped on purpose: a note search that found the
+	// handoff has done its job whether or not the pickup was logged.
+	rows, runID, _, err := search.NotesTracked(s.db, args.Query, s.projectID, limit)
 	if err != nil {
 		return nil, searchNotesResult{}, err
 	}
-	out := searchNotesResult{Notes: make([]noteHit, len(rows))}
+	out := searchNotesResult{Notes: make([]noteHit, len(rows)), RunID: runID}
 	for i, r := range rows {
 		out.Notes[i] = noteHit{
 			ID: r.ID, Kind: r.Kind, Title: r.Title, Body: r.Body,

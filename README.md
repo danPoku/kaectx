@@ -312,12 +312,12 @@ a new chat.
 | `sessions_touching` | Sessions that read or edited a given file. |
 | `explain_file` | Builds a compact briefing for a file: sessions that touched it, actions, known git commit span, and chunk ids to open for the reasoning behind the work. |
 | `save_note` | Records a decision, gotcha, convention, todo, or fact. |
-| `search_notes` | Searches saved notes. |
+| `search_notes` | Searches saved notes. Each call that returns notes is recorded, with the notes it returned in rank order, under the `run_id` in the result. |
 | `record_retrieval_outcome` | Labels retrieved evidence as helpful, unhelpful, stale, incorrect or superseded. Pass the exact search run ID and rank returned by `search_context` or `get_chunk`. |
 | `record_search_outcome` | Records whether a search as a whole answered the question (helpful, partial or unhelpful) and, when it fell short, why (`wrong_project`, `not_indexed`, `stale_state`, `ranking`). Pass the search's run ID. Never changes a result's reliability; a second call for the same search replaces the first. |
 | `checkpoint_status` | Assesses the latest session's message count, active time and file breadth. Active time (`duration_minutes`) is the sum of the gaps between consecutive messages, leaving out gaps over 30 minutes, so a session resumed days later is not days long. When a threshold is reached the level is `checkpoint_recommended`, and `checkpoint_strongly_recommended` only once an urgent threshold is crossed; the agent is instructed to offer a durable handoff and a fresh session, and ctx never switches or ends the session automatically. Every check is stored, healthy ones included, one row per session. Pass `session_id` to assess a specific session. `pending_feedback` lists up to 10 opened results still waiting for an outcome. |
 | `feedback_status` | Returns a bounded inbox of checkpoint decisions and opened retrievals that still need an explicit outcome. It identifies missing feedback; it does not guess whether context was helpful. |
-| `record_checkpoint_outcome` | Records whether the user started a new session, saved a handoff, continued, or dismissed a checkpoint recommendation. After a healthy check only `continued` can be recorded. |
+| `record_checkpoint_outcome` | Records whether the user started a new session, saved a handoff, continued, or dismissed a checkpoint recommendation. After a healthy check only `continued` can be recorded. With `saved_handoff`, pass `note_id` (the ID `save_note` returned for the handoff, a note in this project) so `ctx doctor` can report whether a later note search returned it. |
 
 Search returns snippets on purpose. An agent that wants the full exchange calls
 `get_chunk` with the hit's `chunk_id`, or `get_session` with the session id and
@@ -415,7 +415,7 @@ first_seq and last_seq rather than paging from the start.
 | `ctx project list` | Show projects, their remotes, session counts and known paths. |
 | `ctx project merge <from> <into>` | Fold one project into another. |
 | `ctx audit-secrets` | Re-scan stored text with the current redaction rules and report rows and rule names (never the matched text). Exits non-zero on findings. Changes nothing. |
-| `ctx doctor` | Report the current project's sessions, embedding backlog, retrievals, outcomes, search outcomes and checkpoint checks (by level and by what the user did next), plus database-wide source, ingest-error and unassigned-chunk counts. |
+| `ctx doctor` | Report the current project's sessions, embedding backlog, retrievals, outcomes, search outcomes, checkpoint checks (by level and by what the user did next) and handoff pickup (handoffs saved, and how many a note search returned within 7 days), plus database-wide source, ingest-error and unassigned-chunk counts. |
 | `ctx mcp` | Serve MCP over stdio. Catches up on unread session logs in the background. |
 | `ctx daemon` | Ingest and embed continuously. |
 
