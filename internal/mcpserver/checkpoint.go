@@ -204,6 +204,7 @@ func (s *server) recordCheckpointCheck(sessionID string, out checkpointResult) e
 				THEN checkpoint_observations.recommended_at ELSE excluded.recommended_at END,
 			outcome=CASE WHEN `+newQuestion+` THEN NULL ELSE checkpoint_observations.outcome END,
 			note=CASE WHEN `+newQuestion+` THEN NULL ELSE checkpoint_observations.note END,
+			note_id=CASE WHEN `+newQuestion+` THEN NULL ELSE checkpoint_observations.note_id END,
 			resolved_at=CASE WHEN `+newQuestion+` THEN NULL ELSE checkpoint_observations.resolved_at END,
 			level=excluded.level`,
 		sessionID, s.projectID, out.Level, out.Metrics.Messages, out.Metrics.DurationMins,

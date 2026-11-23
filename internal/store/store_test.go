@@ -167,9 +167,9 @@ func TestMigrateTwiceIsANoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	want := 14 // core, session_git, touch_rooted, commit_source, retrieval telemetry/outcomes/governance/opens/observer/inferred opens, evidence anchors, open events, run observations, checkpoint checks
+	want := 15 // core, session_git, touch_rooted, commit_source, retrieval telemetry/outcomes/governance/opens/observer/inferred opens, evidence anchors, open events, run observations, checkpoint checks, note retrievals
 	if first.VectorsLoaded {
-		want = 15
+		want = 16
 	}
 
 	var count int
@@ -530,7 +530,8 @@ func TestMigrateCheckpointChecksKeepsExistingRows(t *testing.T) {
 	}
 	mustExec(t, db, `DROP TABLE checkpoint_observations`)
 	mustExec(t, db, string(old))
-	mustExec(t, db, `DELETE FROM schema_migrations WHERE version = 15`)
+	// 016 added a column to this table, so it has to run again as well.
+	mustExec(t, db, `DELETE FROM schema_migrations WHERE version IN (15, 16)`)
 	mustExec(t, db, `INSERT INTO projects(id, name) VALUES (1, 'p')`)
 	mustExec(t, db, `INSERT INTO sessions(id, agent, native_id, project_id, started_at) VALUES
 		('s1','codex','s1',1,'2026-09-30T00:00:00Z'),
@@ -603,6 +604,8 @@ func TestMigrateCheckpointChecksKeepsExistingRows(t *testing.T) {
 	if left != 0 {
 		t.Error("deleting a session left its checkpoint row behind")
 	}
+	// Migration 016's column landed on the rebuilt table.
+	mustExec(t, db, `UPDATE checkpoint_observations SET note_id = NULL`)
 	// And a third run changes nothing.
 	if _, err := Migrate(db); err != nil {
 		t.Fatalf("Migrate (third run): %v", err)

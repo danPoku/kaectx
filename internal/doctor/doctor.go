@@ -44,7 +44,19 @@ type Report struct {
 	// "" counts sessions with none recorded. One row per session, so these are
 	// sessions, not checkpoint_status calls.
 	Checkpoints map[string]map[string]int
+	// Handoff pickup: checkpoints answered with saved_handoff, how many of
+	// those name the note they were saved as, and how many of those notes a
+	// search_notes call returned within HandoffPickupDays of being saved.
+	HandoffsSaved    int
+	HandoffsLinked   int
+	HandoffsPickedUp int
 }
+
+// HandoffPickupDays is how long after a handoff is saved a note search still
+// counts as picking it up. A handoff is for the next session, which usually
+// starts within days; a note that surfaces a month later was found, not
+// handed over.
+const HandoffPickupDays = 7
 
 // CheckpointLevels and CheckpointOutcomes fix the order the report prints in.
 // They mirror the CHECK constraints on checkpoint_observations.
@@ -161,6 +173,23 @@ func Collect(ctx context.Context, db *sql.DB, projectID int64) (Report, error) {
 	}
 	if err := collectCheckpoints(ctx, db, projectID, &r); err != nil {
 		return r, fmt.Errorf("read checkpoint checks: %w", err)
+	}
+	// A handoff counts as picked up when a note search returned its note
+	// after it was saved and no more than HandoffPickupDays later. julianday
+	// does the arithmetic so the comparison does not depend on both
+	// timestamps having the same number of fractional digits.
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*),
+		COALESCE(SUM(co.note_id IS NOT NULL),0),
+		COALESCE(SUM(co.note_id IS NOT NULL AND EXISTS (
+			SELECT 1 FROM note_retrievals nr
+			WHERE nr.note_id = co.note_id
+			  AND julianday(nr.created_at) >= julianday(co.resolved_at)
+			  AND julianday(nr.created_at) <= julianday(co.resolved_at) + ?
+		)),0)
+		FROM checkpoint_observations co
+		WHERE co.project_id=? AND co.outcome='saved_handoff'`, HandoffPickupDays, projectID).
+		Scan(&r.HandoffsSaved, &r.HandoffsLinked, &r.HandoffsPickedUp); err != nil {
+		return r, fmt.Errorf("read handoff pickup: %w", err)
 	}
 	return r, nil
 }

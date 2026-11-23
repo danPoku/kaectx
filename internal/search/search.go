@@ -118,3 +118,41 @@ func Notes(db *sql.DB, query string, projectID int64, limit int) ([]NoteResult, 
 	}
 	return results, rows.Err()
 }
+
+// NotesTracked runs Notes and records which notes came back, in rank order,
+// so a later question ("was this handoff ever read?") has something to count.
+//
+// The record is telemetry, and telemetry must never cost the caller their
+// answer: if writing it fails, the notes are still returned, with an empty
+// run ID and the write error in telemetryErr. Only a failed search is an
+// error. A search that returns nothing writes nothing and has no run ID
+// either: there is no row to hang one on.
+func NotesTracked(db *sql.DB, query string, projectID int64, limit int) (results []NoteResult, runID string, telemetryErr, err error) {
+	results, err = Notes(db, query, projectID, limit)
+	if err != nil || len(results) == 0 {
+		return results, "", nil, err
+	}
+	runID, telemetryErr = recordNoteRetrieval(db, results)
+	if telemetryErr != nil {
+		runID = ""
+	}
+	return results, runID, telemetryErr, nil
+}
+
+func recordNoteRetrieval(db *sql.DB, results []NoteResult) (string, error) {
+	runID, err := newRunID()
+	if err != nil {
+		return "", err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback() // no-op after Commit
+	for i, r := range results {
+		if _, err := tx.Exec(`INSERT INTO note_retrievals(run_id, rank, note_id) VALUES (?, ?, ?)`, runID, i+1, r.ID); err != nil {
+			return "", err
+		}
+	}
+	return runID, tx.Commit()
+}

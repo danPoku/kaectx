@@ -5,6 +5,8 @@ package mcpserver
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -74,12 +76,15 @@ type checkpointOutcomeArgs struct {
 	SessionID string `json:"session_id" jsonschema:"session_id returned by checkpoint_status or feedback_status"`
 	Outcome   string `json:"outcome" jsonschema:"one of started_new_session, saved_handoff, continued, dismissed"`
 	Note      string `json:"note,omitempty" jsonschema:"optional explanation; secrets are redacted before storage"`
+	// NoteID is 0 when absent: note IDs start at 1.
+	NoteID int64 `json:"note_id,omitempty" jsonschema:"for saved_handoff, the id save_note returned for the handoff note, so ctx can tell later whether a session read it"`
 }
 
 type checkpointOutcomeResult struct {
 	Recorded  bool   `json:"recorded"`
 	SessionID string `json:"session_id"`
 	Outcome   string `json:"outcome"`
+	NoteID    int64  `json:"note_id,omitempty"`
 }
 
 var validCheckpointOutcomes = map[string]bool{
@@ -104,7 +109,7 @@ func (s *server) registerFeedback(srv *mcp.Server) {
 	}, s.feedbackStatus)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "record_checkpoint_outcome",
-		Description: "Record the user's response to a checkpoint check. Use the exact session_id and one of started_new_session, saved_handoff, continued, or dismissed. After a healthy check, with no recommendation made, only continued applies.",
+		Description: "Record the user's response to a checkpoint check. Use the exact session_id and one of started_new_session, saved_handoff, continued, or dismissed. After a healthy check, with no recommendation made, only continued applies. For saved_handoff, pass note_id with the id save_note returned for the handoff, so ctx can tell later whether a session picked it up.",
 	}, s.recordCheckpointOutcome)
 }
 
@@ -226,14 +231,18 @@ func (s *server) recordCheckpointOutcome(_ context.Context, _ *mcp.CallToolReque
 	if args.Note != "" {
 		note = redact.Redact(args.Note)
 	}
+	noteID, err := s.handoffNoteID(args)
+	if err != nil {
+		return nil, checkpointOutcomeResult{}, err
+	}
 	// A healthy check made no recommendation, so there was nothing to save,
 	// dismiss or leave: the only thing the user can have done is carry on.
 	// The level test sits in the UPDATE itself so a check that changes the row
 	// between a read and this write cannot slip a wrong outcome through.
 	result, err := s.db.Exec(`UPDATE checkpoint_observations
-		SET outcome=?, note=?, resolved_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		SET outcome=?, note=?, note_id=?, resolved_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE session_id=? AND project_id=? AND (level<>'healthy' OR ?='continued')`,
-		args.Outcome, note, args.SessionID, s.projectID, args.Outcome)
+		args.Outcome, note, noteID, args.SessionID, s.projectID, args.Outcome)
 	if err != nil {
 		return nil, checkpointOutcomeResult{}, err
 	}
@@ -250,5 +259,31 @@ func (s *server) recordCheckpointOutcome(_ context.Context, _ *mcp.CallToolReque
 		}
 		return nil, checkpointOutcomeResult{}, fmt.Errorf("no checkpoint check found for this session in this project; call checkpoint_status first")
 	}
-	return nil, checkpointOutcomeResult{Recorded: true, SessionID: args.SessionID, Outcome: args.Outcome}, nil
+	return nil, checkpointOutcomeResult{Recorded: true, SessionID: args.SessionID, Outcome: args.Outcome, NoteID: args.NoteID}, nil
+}
+
+// handoffNoteID validates the note a saved_handoff names and returns the value
+// to store: the ID, or NULL when none was given. The note must be this
+// project's own. A global note or another project's note is refused, because
+// a pickup count that follows a link into someone else's notes would be
+// counting the wrong project's reads.
+func (s *server) handoffNoteID(args checkpointOutcomeArgs) (any, error) {
+	if args.NoteID == 0 {
+		return nil, nil
+	}
+	if args.Outcome != "saved_handoff" {
+		return nil, fmt.Errorf("note_id only applies to saved_handoff, not %s", args.Outcome)
+	}
+	var projectID sql.NullInt64
+	err := s.db.QueryRow(`SELECT project_id FROM notes WHERE id=?`, args.NoteID).Scan(&projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("note_id: note %d not found", args.NoteID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !projectID.Valid || projectID.Int64 != s.projectID {
+		return nil, fmt.Errorf("note_id: note %d belongs to another project", args.NoteID)
+	}
+	return args.NoteID, nil
 }
