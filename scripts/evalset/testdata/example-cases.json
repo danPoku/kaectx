@@ -1,0 +1,53 @@
+{
+ "version": 1,
+ "cases": [
+  {
+   "id": "helpful-001",
+   "source": "helpful_label",
+   "checked": "label",
+   "project": "example-api",
+   "project_remote": "github.com/example/example-api",
+   "query": "WAL",
+   "until": "2026-09-22T00:00:00Z",
+   "expected": [
+    {"session_id": "claude-code:example-1", "first_seq": 0, "last_seq": 1}
+   ],
+   "note": "Made-up content. A hit an agent labelled helpful: the query, and the exchange that answered it."
+  },
+  {
+   "id": "miss-001",
+   "source": "miss",
+   "checked": "hand",
+   "project": "example-api",
+   "project_remote": "github.com/example/example-api",
+   "query": "checkpoint",
+   "agent": "codex",
+   "expected": [
+    {"session_id": "codex:example-2", "first_seq": 4, "last_seq": 5},
+    {"session_id": "codex:example-2", "first_seq": 40, "last_seq": 41}
+   ],
+   "note": "Two expected exchanges; only the first exists in the test corpus, so recall is 0.5."
+  },
+  {
+   "id": "stale-001",
+   "source": "stale",
+   "checked": "hand",
+   "project": "example-api",
+   "query": "busy_timeout",
+   "since": "2026-09-25",
+   "expected": [
+    {"session_id": "claude-code:example-1", "first_seq": 2, "last_seq": 3}
+   ],
+   "note": "The answer is from 21 September, before the window opens, so a windowed search cannot find it."
+  },
+  {
+   "id": "empty-001",
+   "source": "empty",
+   "checked": "hand",
+   "project": "example-api",
+   "query": "zebra",
+   "expect_none": true,
+   "note": "Nothing in the corpus answers this; the right result is an empty one."
+  }
+ ]
+}
