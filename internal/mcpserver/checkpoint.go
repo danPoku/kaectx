@@ -46,6 +46,9 @@ type checkpointResult struct {
 	// checkpoint decision this call may have just recorded is the user's to
 	// make, not something to ask back immediately.
 	PendingFeedback []feedbackNudge `json:"pending_feedback"`
+	// PendingSearches lists this process's searches with no whole-search
+	// outcome yet, capped like PendingFeedback.
+	PendingSearches []pendingSearch `json:"pending_searches"`
 }
 
 // checkpointPendingLimit caps pending_feedback so a long-neglected backlog
@@ -63,7 +66,7 @@ type checkpointSession struct {
 func (s *server) registerCheckpoint(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "checkpoint_status",
-		Description: "Assess whether the current coding session is large enough to merit a handoff. Call at natural milestones and when work becomes long, repetitive, or spans many files. If should_signal is true, explain the reasons to the user and offer to save a checkpoint and continue in a fresh session. This is advisory: never end the session automatically. pending_feedback lists opened results still waiting for an outcome; label the ones whose usefulness you now know with record_retrieval_outcome.",
+		Description: "Assess whether the current coding session is large enough to merit a handoff. Call at natural milestones and when work becomes long, repetitive, or spans many files. If should_signal is true, explain the reasons to the user and offer to save a checkpoint and continue in a fresh session. This is advisory: never end the session automatically. pending_feedback lists opened results still waiting for an outcome; label the ones whose usefulness you now know with record_retrieval_outcome. pending_searches lists your own searches in this session with no whole-search outcome yet; make each one's next_step call (a search answered by its snippets alone is helpful).",
 	}, s.checkpointStatus)
 }
 
@@ -152,6 +155,9 @@ func (s *server) checkpointStatus(_ context.Context, _ *mcp.CallToolRequest, arg
 	}
 	if out.PendingFeedback, err = s.pendingRetrievalNudges(checkpointPendingLimit); err != nil {
 		return nil, checkpointResult{}, fmt.Errorf("list pending feedback: %w", err)
+	}
+	if out.PendingSearches, err = s.pendingSearches(checkpointPendingLimit); err != nil {
+		return nil, checkpointResult{}, fmt.Errorf("list pending searches: %w", err)
 	}
 	return nil, out, nil
 }
