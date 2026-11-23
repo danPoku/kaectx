@@ -44,6 +44,13 @@ type Result struct {
 // earlier outcome for that same result. note is redacted before storage. The
 // label is anchored to the result's first message, so it keeps counting if the
 // chunk is later rebuilt with different bounds.
+//
+// projectID is the caller's project and must own the search. The label itself
+// is filed under the HIT's project, which differs when the search covered all
+// projects: an observation judges a piece of evidence, and governance counts
+// evidence per project, so a label on another project's exchange must count
+// there and nowhere else. Like a complaint about a branch, filed against that
+// branch however it reached head office.
 func Record(db *sql.DB, projectID int64, runID string, rank int, outcome, note string) (Result, error) {
 	if !ValidOutcome(outcome) {
 		return Result{}, fmt.Errorf("outcome must be one of %v, not %q", Outcomes, outcome)
@@ -52,9 +59,11 @@ func Record(db *sql.DB, projectID int64, runID string, rank int, outcome, note s
 		return Result{}, fmt.Errorf("run_id and a positive rank are required")
 	}
 	var e governance.Evidence
-	err := db.QueryRow(`SELECT rc.evidence_key, rc.session_id, rc.first_seq, rc.last_seq
+	var hitProject int64
+	err := db.QueryRow(`SELECT rc.evidence_key, rc.session_id, rc.first_seq, rc.last_seq,
+			COALESCE(rc.project_id, rr.project_id)
 		FROM retrieval_candidates rc JOIN retrieval_runs rr ON rr.id=rc.run_id
-		WHERE rc.run_id=? AND rc.rank=? AND rr.project_id=?`, runID, rank, projectID).Scan(&e.Key, &e.SessionID, &e.FirstSeq, &e.LastSeq)
+		WHERE rc.run_id=? AND rc.rank=? AND rr.project_id=?`, runID, rank, projectID).Scan(&e.Key, &e.SessionID, &e.FirstSeq, &e.LastSeq, &hitProject)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Result{}, ErrNotFound
 	}
@@ -69,11 +78,11 @@ func Record(db *sql.DB, projectID int64, runID string, rank int, outcome, note s
 		VALUES (?,?,?,?,?,?,?,?)
 		ON CONFLICT(run_id,candidate_rank) WHERE run_id IS NOT NULL DO UPDATE SET
 			outcome=excluded.outcome, note=excluded.note,
-			created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, projectID, e.Key, e.SessionID, e.FirstSeq, runID, rank, outcome, storedNote); err != nil {
+			created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, hitProject, e.Key, e.SessionID, e.FirstSeq, runID, rank, outcome, storedNote); err != nil {
 		return Result{}, err
 	}
 	out := Result{Recorded: true, Evidence: e}
-	out.Assessment, out.AssessErr = governance.Assess(db, projectID, e)
+	out.Assessment, out.AssessErr = governance.Assess(db, hitProject, e)
 	return out, nil
 }
 

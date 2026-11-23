@@ -197,3 +197,115 @@ func TestCollectEmptyProjectHasZeroCoverage(t *testing.T) {
 		t.Errorf("empty report = %+v", r)
 	}
 }
+
+func TestCollectCountsCheckpointsByLevelAndOutcome(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "ctx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO projects(id, name) VALUES (1, 'current'), (2, 'other')`)
+	rows := []struct {
+		session string
+		project int
+		level   string
+		outcome any
+	}{
+		{"h1", 1, "healthy", nil},
+		{"h2", 1, "healthy", "continued"},
+		{"r1", 1, "checkpoint_recommended", "saved_handoff"},
+		{"r2", 1, "checkpoint_recommended", "saved_handoff"},
+		{"r3", 1, "checkpoint_recommended", nil},
+		{"s1", 1, "checkpoint_strongly_recommended", "dismissed"},
+		{"x1", 2, "checkpoint_strongly_recommended", "started_new_session"}, // another project
+	}
+	for _, row := range rows {
+		exec(`INSERT INTO sessions(id, agent, native_id, project_id, started_at) VALUES (?, 'codex', ?, ?, '2026-09-30T00:00:00Z')`, row.session, row.session, row.project)
+		exec(`INSERT INTO checkpoint_observations(session_id, project_id, level, message_count, duration_minutes, files_changed, outcome)
+			VALUES (?, ?, ?, 1, 1, 0, ?)`, row.session, row.project, row.level, row.outcome)
+	}
+
+	r, err := doctor.Collect(context.Background(), db, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]map[string]int{
+		"healthy":                         {"": 1, "continued": 1},
+		"checkpoint_recommended":          {"": 1, "saved_handoff": 2},
+		"checkpoint_strongly_recommended": {"dismissed": 1},
+	}
+	if !reflect.DeepEqual(r.Checkpoints, want) {
+		t.Errorf("Checkpoints = %v, want %v", r.Checkpoints, want)
+	}
+	if r.CheckpointChecks() != 6 || r.CheckpointLevelTotal("checkpoint_recommended") != 3 {
+		t.Errorf("checks = %d, recommended = %d; want 6 and 3", r.CheckpointChecks(), r.CheckpointLevelTotal("checkpoint_recommended"))
+	}
+}
+
+// TestCollectCountsHandoffPickup is #42's acceptance case: a handoff saved
+// with its note, then returned by a note search two days later, is picked up;
+// one first returned after eight days is not.
+func TestCollectCountsHandoffPickup(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "ctx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const saved = "2026-10-01T10:00:00.000Z"
+	exec(`INSERT INTO projects(id, name) VALUES (1, 'current'), (2, 'other')`)
+	handoffs := []struct {
+		name     string
+		session  string
+		project  int
+		outcome  string
+		noteID   any    // nil = saved without naming its note
+		searched string // when a note search returned the note; "" = never
+	}{
+		{"returned two days later", "a", 1, "saved_handoff", 1, "2026-10-03T10:00:00.000Z"},
+		{"returned after eight days", "b", 1, "saved_handoff", 2, "2026-10-09T10:00:00.000Z"},
+		{"returned on the seventh day exactly", "c", 1, "saved_handoff", 3, "2026-10-08T10:00:00.000Z"},
+		{"returned only before it was linked", "d", 1, "saved_handoff", 4, "2026-09-30T10:00:00.000Z"},
+		{"never returned", "e", 1, "saved_handoff", 5, ""},
+		{"no note named", "f", 1, "saved_handoff", nil, ""},
+		{"dismissed, not a handoff", "g", 1, "dismissed", nil, ""},
+		{"another project's handoff", "h", 2, "saved_handoff", 8, "2026-10-02T10:00:00.000Z"},
+	}
+	for i, h := range handoffs {
+		exec(`INSERT INTO sessions(id, agent, native_id, project_id, started_at) VALUES (?, 'codex', ?, ?, '2026-09-30T00:00:00Z')`, h.session, h.session, h.project)
+		exec(`INSERT INTO notes(id, project_id, kind, title) VALUES (?, ?, 'todo', ?)`, i+1, h.project, h.name)
+		exec(`INSERT INTO checkpoint_observations(session_id, project_id, level, message_count, duration_minutes, files_changed, outcome, note_id, resolved_at)
+			VALUES (?, ?, 'checkpoint_recommended', 400, 60, 0, ?, ?, ?)`, h.session, h.project, h.outcome, h.noteID, saved)
+		if h.searched != "" {
+			exec(`INSERT INTO note_retrievals(run_id, rank, note_id, created_at) VALUES (?, 1, ?, ?)`, "run-"+h.session, h.noteID, h.searched)
+		}
+	}
+	// A second, late search of the two-day handoff must not count it twice.
+	exec(`INSERT INTO note_retrievals(run_id, rank, note_id, created_at) VALUES ('run-a2', 1, 1, '2026-10-04T10:00:00.000Z')`)
+
+	r, err := doctor.Collect(context.Background(), db, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.HandoffsSaved != 6 || r.HandoffsLinked != 5 || r.HandoffsPickedUp != 2 {
+		t.Errorf("handoffs saved/linked/picked up = %d/%d/%d, want 6/5/2 (the two-day and the seventh-day handoffs)",
+			r.HandoffsSaved, r.HandoffsLinked, r.HandoffsPickedUp)
+	}
+}
