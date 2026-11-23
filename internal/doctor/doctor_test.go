@@ -197,3 +197,56 @@ func TestCollectEmptyProjectHasZeroCoverage(t *testing.T) {
 		t.Errorf("empty report = %+v", r)
 	}
 }
+
+func TestCollectCountsCheckpointsByLevelAndOutcome(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "ctx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO projects(id, name) VALUES (1, 'current'), (2, 'other')`)
+	rows := []struct {
+		session string
+		project int
+		level   string
+		outcome any
+	}{
+		{"h1", 1, "healthy", nil},
+		{"h2", 1, "healthy", "continued"},
+		{"r1", 1, "checkpoint_recommended", "saved_handoff"},
+		{"r2", 1, "checkpoint_recommended", "saved_handoff"},
+		{"r3", 1, "checkpoint_recommended", nil},
+		{"s1", 1, "checkpoint_strongly_recommended", "dismissed"},
+		{"x1", 2, "checkpoint_strongly_recommended", "started_new_session"}, // another project
+	}
+	for _, row := range rows {
+		exec(`INSERT INTO sessions(id, agent, native_id, project_id, started_at) VALUES (?, 'codex', ?, ?, '2026-09-30T00:00:00Z')`, row.session, row.session, row.project)
+		exec(`INSERT INTO checkpoint_observations(session_id, project_id, level, message_count, duration_minutes, files_changed, outcome)
+			VALUES (?, ?, ?, 1, 1, 0, ?)`, row.session, row.project, row.level, row.outcome)
+	}
+
+	r, err := doctor.Collect(context.Background(), db, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]map[string]int{
+		"healthy":                         {"": 1, "continued": 1},
+		"checkpoint_recommended":          {"": 1, "saved_handoff": 2},
+		"checkpoint_strongly_recommended": {"dismissed": 1},
+	}
+	if !reflect.DeepEqual(r.Checkpoints, want) {
+		t.Errorf("Checkpoints = %v, want %v", r.Checkpoints, want)
+	}
+	if r.CheckpointChecks() != 6 || r.CheckpointLevelTotal("checkpoint_recommended") != 3 {
+		t.Errorf("checks = %d, recommended = %d; want 6 and 3", r.CheckpointChecks(), r.CheckpointLevelTotal("checkpoint_recommended"))
+	}
+}

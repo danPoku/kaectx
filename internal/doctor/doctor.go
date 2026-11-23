@@ -39,6 +39,36 @@ type Report struct {
 	// feedback.SearchReasons.
 	SearchOutcomes map[string]int
 	SearchReasons  map[string]int
+	// Checkpoints counts this project's checked sessions by level, then by
+	// outcome, keyed by CheckpointLevels and CheckpointOutcomes; the outcome
+	// "" counts sessions with none recorded. One row per session, so these are
+	// sessions, not checkpoint_status calls.
+	Checkpoints map[string]map[string]int
+}
+
+// CheckpointLevels and CheckpointOutcomes fix the order the report prints in.
+// They mirror the CHECK constraints on checkpoint_observations.
+var (
+	CheckpointLevels   = []string{"healthy", "checkpoint_recommended", "checkpoint_strongly_recommended"}
+	CheckpointOutcomes = []string{"started_new_session", "saved_handoff", "continued", "dismissed"}
+)
+
+// CheckpointChecks is the number of sessions checkpoint_status has assessed.
+func (r Report) CheckpointChecks() int {
+	total := 0
+	for _, level := range CheckpointLevels {
+		total += r.CheckpointLevelTotal(level)
+	}
+	return total
+}
+
+// CheckpointLevelTotal is the number of checked sessions standing at level.
+func (r Report) CheckpointLevelTotal(level string) int {
+	total := 0
+	for _, n := range r.Checkpoints[level] {
+		total += n
+	}
+	return total
 }
 
 func (r Report) OutcomeCoverage() float64 {
@@ -129,6 +159,9 @@ func Collect(ctx context.Context, db *sql.DB, projectID int64) (Report, error) {
 	if err := collectSearchOutcomes(ctx, db, projectID, &r); err != nil {
 		return r, fmt.Errorf("read search outcomes: %w", err)
 	}
+	if err := collectCheckpoints(ctx, db, projectID, &r); err != nil {
+		return r, fmt.Errorf("read checkpoint checks: %w", err)
+	}
 	return r, nil
 }
 
@@ -162,6 +195,35 @@ func collectSearchOutcomes(ctx context.Context, db *sql.DB, projectID int64, r *
 		if reason != "" {
 			r.SearchReasons[reason] += n
 		}
+	}
+	return rows.Err()
+}
+
+// collectCheckpoints counts checked sessions by level and outcome. It is not
+// limited to seven days like the retrieval figures: a project sees a handful
+// of checkpoints a week, and the question being asked ("is the recommendation
+// rule any good?") needs every one of them.
+func collectCheckpoints(ctx context.Context, db *sql.DB, projectID int64, r *Report) error {
+	r.Checkpoints = map[string]map[string]int{}
+	for _, level := range CheckpointLevels {
+		r.Checkpoints[level] = map[string]int{}
+	}
+	rows, err := db.QueryContext(ctx, `SELECT level, COALESCE(outcome,''), COUNT(*)
+		FROM checkpoint_observations WHERE project_id=? GROUP BY level, outcome`, projectID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var level, outcome string
+		var n int
+		if err := rows.Scan(&level, &outcome, &n); err != nil {
+			return err
+		}
+		if r.Checkpoints[level] == nil {
+			r.Checkpoints[level] = map[string]int{}
+		}
+		r.Checkpoints[level][outcome] += n
 	}
 	return rows.Err()
 }

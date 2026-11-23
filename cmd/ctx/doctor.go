@@ -70,7 +70,9 @@ outcomes (retained evidence)
 search outcomes (last 7 days)
   %s
   reasons: %s
-`, r.ProjectName, r.Sources, r.SourcesWithErrors, lastIngest,
+
+checkpoints (sessions checked, all time)
+%s`, r.ProjectName, r.Sources, r.SourcesWithErrors, lastIngest,
 		r.Sessions, r.Messages, r.Chunks, r.PendingEmbeddings, r.UnassignedChunks,
 		r.RecentRetrievals, r.RecentZeroResultRuns, r.RecentHybridRuns, r.RecentPolicyRuns,
 		r.RecentOpenedResults, r.RecentOpenedResults-r.RecentInferredOpens, r.RecentInferredOpens,
@@ -78,7 +80,35 @@ search outcomes (last 7 days)
 		r.Outcomes, r.ObservedEvidence, r.RetrievedEvidence, r.OutcomeCoverage(),
 		r.CredibleEvidence, r.NeutralObservedEvidence(),
 		formatCounts(feedback.SearchOutcomes, r.SearchOutcomes),
-		formatCounts(feedback.SearchReasons, r.SearchReasons))
+		formatCounts(feedback.SearchReasons, r.SearchReasons),
+		formatCheckpoints(r))
+}
+
+// formatCheckpoints prints how many sessions stand at each level and what the
+// user did after each, e.g.
+//
+//	checks: 9 (healthy 4, checkpoint_recommended 3, checkpoint_strongly_recommended 2)
+//	healthy: continued 1, no outcome 3
+//	checkpoint_recommended: started_new_session 0, saved_handoff 2, continued 0, dismissed 0, unresolved 1
+//
+// A healthy check has one possible outcome, so its line lists only that. Its
+// missing outcomes read "no outcome", not "unresolved": nothing was asked.
+func formatCheckpoints(r doctor.Report) string {
+	levelTotals := make(map[string]int, len(doctor.CheckpointLevels))
+	for _, level := range doctor.CheckpointLevels {
+		levelTotals[level] = r.CheckpointLevelTotal(level)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "  checks: %d (%s)\n", r.CheckpointChecks(), formatCounts(doctor.CheckpointLevels, levelTotals))
+	for _, level := range doctor.CheckpointLevels {
+		counts := r.Checkpoints[level]
+		if level == "healthy" {
+			fmt.Fprintf(&b, "  %s: continued %d, no outcome %d\n", level, counts["continued"], counts[""])
+			continue
+		}
+		fmt.Fprintf(&b, "  %s: %s, unresolved %d\n", level, formatCounts(doctor.CheckpointOutcomes, counts), counts[""])
+	}
+	return b.String()
 }
 
 // formatCounts prints counts in the fixed order of keys, e.g.

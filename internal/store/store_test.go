@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+
+	"github.com/danPoku/kaectx/migrations"
 )
 
 // expectedObjects is the full set of tables/views 001_core.sql must produce,
@@ -165,9 +167,9 @@ func TestMigrateTwiceIsANoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	want := 13 // core, session_git, touch_rooted, commit_source, retrieval telemetry/outcomes/governance/opens/observer/inferred opens, evidence anchors, open events, run observations
+	want := 14 // core, session_git, touch_rooted, commit_source, retrieval telemetry/outcomes/governance/opens/observer/inferred opens, evidence anchors, open events, run observations, checkpoint checks
 	if first.VectorsLoaded {
-		want = 14
+		want = 15
 	}
 
 	var count int
@@ -508,5 +510,101 @@ func TestMigrateCommitSourceAddsANullableColumn(t *testing.T) {
 	}
 	if !migrationRecorded(t, db, 5) {
 		t.Error("migration 005 not recorded exactly once")
+	}
+}
+
+// TestMigrateCheckpointChecksKeepsExistingRows is the upgrade path for
+// migration 015: a database from the previous release, holding checkpoint
+// recommendations in the old table, must come out with every row unchanged
+// and with 'healthy' newly allowed.
+func TestMigrateCheckpointChecksKeepsExistingRows(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := Migrate(db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	// Put the table back the way migration 010 made it, as if 015 had never
+	// run, and fill it with rows covering every nullable column both ways.
+	old, err := migrations.FS.ReadFile("010_feedback_observer.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, db, `DROP TABLE checkpoint_observations`)
+	mustExec(t, db, string(old))
+	mustExec(t, db, `DELETE FROM schema_migrations WHERE version = 15`)
+	mustExec(t, db, `INSERT INTO projects(id, name) VALUES (1, 'p')`)
+	mustExec(t, db, `INSERT INTO sessions(id, agent, native_id, project_id, started_at) VALUES
+		('s1','codex','s1',1,'2026-09-30T00:00:00Z'),
+		('s2','codex','s2',1,'2026-09-30T00:00:00Z'),
+		('s3','codex','s3',1,'2026-09-30T00:00:00Z')`)
+	mustExec(t, db, `INSERT INTO checkpoint_observations
+		(session_id, project_id, level, message_count, duration_minutes, files_changed, reasons, outcome, note, recommended_at, resolved_at) VALUES
+		('s1',1,'checkpoint_strongly_recommended',900,36044,41,'["900 messages"]','saved_handoff','note text','2026-10-01T10:00:00.000Z','2026-10-01T10:05:00.000Z'),
+		('s2',1,'checkpoint_recommended',410,30,2,'["410 messages"]',NULL,NULL,'2026-10-02T10:00:00.000Z',NULL),
+		('s3',1,'checkpoint_strongly_recommended',500,300,1,'[]','dismissed',NULL,'2026-10-03T10:00:00.000Z','2026-10-03T11:00:00.000Z')`)
+
+	const dump = `SELECT session_id || '|' || project_id || '|' || level || '|' || message_count || '|' ||
+		duration_minutes || '|' || files_changed || '|' || reasons || '|' || COALESCE(outcome,'<null>') || '|' ||
+		COALESCE(note,'<null>') || '|' || recommended_at || '|' || COALESCE(resolved_at,'<null>')
+		FROM checkpoint_observations ORDER BY session_id`
+	read := func() []string {
+		t.Helper()
+		rows, err := db.Query(dump)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, line)
+		}
+		return out
+	}
+	before := read()
+	if len(before) != 3 {
+		t.Fatalf("setup: %d rows, want 3", len(before))
+	}
+	// The old table really is the old one: it refuses 'healthy'.
+	if _, err := db.Exec(`INSERT INTO sessions(id, agent, native_id, project_id, started_at) VALUES ('s4','codex','s4',1,'2026-09-30T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	const healthy = `INSERT INTO checkpoint_observations(session_id, project_id, level, message_count, duration_minutes, files_changed)
+		VALUES ('s4', 1, 'healthy', 10, 5, 0)`
+	if _, err := db.Exec(healthy); err == nil {
+		t.Fatal("setup: the pre-015 table accepted level 'healthy'")
+	}
+
+	if _, err := Migrate(db); err != nil {
+		t.Fatalf("Migrate (upgrade): %v", err)
+	}
+	after := read()
+	if len(after) != len(before) {
+		t.Fatalf("rows after migration = %d, want %d", len(after), len(before))
+	}
+	for i := range before {
+		if after[i] != before[i] {
+			t.Errorf("row changed by migration:\n before %s\n after  %s", before[i], after[i])
+		}
+	}
+	mustExec(t, db, healthy)
+	if _, err := db.Exec(`UPDATE checkpoint_observations SET level = 'made_up' WHERE session_id = 's4'`); err == nil {
+		t.Error("the rebuilt table accepted an unknown level")
+	}
+	// The foreign keys came across with the rebuild: deleting a session still
+	// removes its check.
+	mustExec(t, db, `DELETE FROM sessions WHERE id = 's1'`)
+	var left int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM checkpoint_observations WHERE session_id = 's1'`).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 {
+		t.Error("deleting a session left its checkpoint row behind")
+	}
+	// And a third run changes nothing.
+	if _, err := Migrate(db); err != nil {
+		t.Fatalf("Migrate (third run): %v", err)
 	}
 }
