@@ -61,6 +61,11 @@ type searchContextResult struct {
 	// clients that read it keep working. Deprecated: use run_id.
 	RetrievalRunID    string `json:"retrieval_run_id,omitempty"`
 	TelemetryRecorded bool   `json:"telemetry_recorded"`
+	// OutcomeNextStep is the record_search_outcome call for this search. Per-hit
+	// labels only judge what an agent opened, so they are almost all positive;
+	// a search nobody opened anything from says nothing unless the agent is
+	// asked about the search itself.
+	OutcomeNextStep string `json:"outcome_next_step,omitempty"`
 	// UsedSemanticSearch tells the caller whether this ran keyword+semantic
 	// fusion or fell back to keyword-only (no embedding worker has caught
 	// up yet, or the local Ollama isn't reachable) — visible so an agent
@@ -89,6 +94,10 @@ type noteHit struct {
 
 type searchNotesResult struct {
 	Notes []noteHit `json:"notes"`
+	// RunID identifies this note search in note_retrievals. It is omitted
+	// when nothing was returned or the record could not be written; the notes
+	// themselves are returned either way.
+	RunID string `json:"run_id,omitempty"`
 }
 
 func (s *server) registerSearch(srv *mcp.Server) {
@@ -98,7 +107,8 @@ func (s *server) registerSearch(srv *mcp.Server) {
 			"Returns short snippets, not full transcripts. To read a hit, make the call in its next_step: get_chunk with its chunk_id, the result's run_id and the hit's rank (the matching exchange, ~1k tokens). Or call get_session with its session_id, from_seq/to_seq set to the hit's first_seq/last_seq, and the same run_id and rank. " +
 			"For questions about a period (\"what happened last week\"), set since/until: otherwise older, stronger matches outrank the period you asked about. " +
 			"If the result's index.warning is set, ctx has not read some recent logs yet; say so rather than concluding nothing happened. " +
-			"When the work spans more than one repo (an API and its frontend, say) and this project's sessions do not hold the answer, set scope to all: every project is searched and each hit names its project. A hit from another project can be read only through its next_step, which carries the run_id and rank that authorise it.",
+			"When the work spans more than one repo (an API and its frontend, say) and this project's sessions do not hold the answer, set scope to all: every project is searched and each hit names its project. A hit from another project can be read only through its next_step, which carries the run_id and rank that authorise it. " +
+			"Once you know whether the search answered your question, make the call in outcome_next_step. A search answered by its snippets alone, with nothing opened, is helpful; one that returned nothing useful is unhelpful, with the reason.",
 	}, s.searchContext)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -128,7 +138,9 @@ func (s *server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, args
 	if err != nil {
 		return nil, searchContextResult{}, err
 	}
-	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RunID: got.RunID, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil, GovernanceApplied: got.GovernanceApplied, Index: s.indexStatus()}
+	out := searchContextResult{Results: make([]searchContextHit, len(got.Results)), UsedSemanticSearch: got.UsedHybrid, RunID: got.RunID, RetrievalRunID: got.RunID, TelemetryRecorded: got.TelemetryErr == nil, GovernanceApplied: got.GovernanceApplied, Index: s.indexStatus(),
+		OutcomeNextStep: searchOutcomeCall(got.RunID)}
+	s.served.add(got.RunID, args.Query)
 	for i, r := range got.Results {
 		out.Results[i] = searchContextHit{
 			Rank: i + 1, ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent,
@@ -158,11 +170,13 @@ func (s *server) searchNotes(_ context.Context, _ *mcp.CallToolRequest, args sea
 	if limit <= 0 {
 		limit = defaultSearchLimit
 	}
-	rows, err := search.Notes(s.db, args.Query, s.projectID, limit)
+	// The telemetry error is dropped on purpose: a note search that found the
+	// handoff has done its job whether or not the pickup was logged.
+	rows, runID, _, err := search.NotesTracked(s.db, args.Query, s.projectID, limit)
 	if err != nil {
 		return nil, searchNotesResult{}, err
 	}
-	out := searchNotesResult{Notes: make([]noteHit, len(rows))}
+	out := searchNotesResult{Notes: make([]noteHit, len(rows)), RunID: runID}
 	for i, r := range rows {
 		out.Notes[i] = noteHit{
 			ID: r.ID, Kind: r.Kind, Title: r.Title, Body: r.Body,

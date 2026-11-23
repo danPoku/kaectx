@@ -124,6 +124,12 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := applySQLMigration(db, 14, "014_retrieval_run_observations.sql"); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := applySQLMigration(db, 15, "015_checkpoint_checks.sql"); err != nil {
+		return MigrateResult{}, err
+	}
+	if err := applySQLMigration(db, 16, "016_note_retrievals.sql"); err != nil {
+		return MigrateResult{}, err
+	}
 	if err := migrateCandidateProject(db); err != nil {
 		return MigrateResult{}, err
 	}

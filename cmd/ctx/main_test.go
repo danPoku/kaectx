@@ -25,9 +25,20 @@ func TestFormatDoctor(t *testing.T) {
 		RetrievedEvidence: 4, ObservedEvidence: 2, CredibleEvidence: 1,
 		SearchOutcomes: map[string]int{"helpful": 3, "partial": 2},
 		SearchReasons:  map[string]int{"wrong_project": 2},
+		Checkpoints: map[string]map[string]int{
+			"healthy":                         {"continued": 1, "": 3},
+			"checkpoint_recommended":          {"saved_handoff": 2, "": 1},
+			"checkpoint_strongly_recommended": {"dismissed": 1, "started_new_session": 1},
+		},
+		HandoffsSaved: 2, HandoffsLinked: 2, HandoffsPickedUp: 1,
 	})
 	for _, want := range []string{"ctx doctor: ctx", "2 (1 with errors)", "4 / 20 / 8", "pending: 3", "10 (2 zero-result, 6 hybrid, 1 risk-aware)", "5 (3 exact, 2 inferred; 3 labelled, 2 awaiting outcome)", "2 / 4 evidence keys (50.0%)", "1 / 1",
-		"helpful 3, partial 2, unhelpful 0", "reasons: wrong_project 2, not_indexed 0, stale_state 0, ranking 0"} {
+		"helpful 3, partial 2, unhelpful 0", "reasons: wrong_project 2, not_indexed 0, stale_state 0, ranking 0",
+		"checks: 9 (healthy 4, checkpoint_recommended 3, checkpoint_strongly_recommended 2)",
+		"healthy: continued 1, no outcome 3",
+		"checkpoint_recommended: started_new_session 0, saved_handoff 2, continued 0, dismissed 0, unresolved 1",
+		"checkpoint_strongly_recommended: started_new_session 1, saved_handoff 0, continued 0, dismissed 1, unresolved 0",
+		"handoffs saved: 2 (2 linked to a note, 1 of those returned by a note search within 7 days)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
