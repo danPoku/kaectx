@@ -110,6 +110,14 @@ type NoteResult struct {
 	Tags      []string
 	Agent     string
 	CreatedAt string
+	// Source: the session the note was saved in and the first message of
+	// that exchange. HasSource is false until the note's save_note call has
+	// been found in an ingested log. SourceChunkID is the chunk holding the
+	// anchor now, or 0 when the exchange has not been chunked yet.
+	SessionID     string
+	AnchorSeq     int
+	HasSource     bool
+	SourceChunkID int64
 }
 
 // Notes runs SearchNotes: keyword search over live (non-superseded) notes,
@@ -134,11 +142,16 @@ func Notes(db *sql.DB, query string, projectID int64, limit int) ([]NoteResult, 
 	for rows.Next() {
 		var r NoteResult
 		var tagsJSON string
-		var agent sql.NullString
-		if err := rows.Scan(&r.ID, &r.Kind, &r.Title, &r.Body, &tagsJSON, &agent, &r.CreatedAt); err != nil {
+		var agent, sessionID sql.NullString
+		var anchorSeq, chunkID sql.NullInt64
+		if err := rows.Scan(&r.ID, &r.Kind, &r.Title, &r.Body, &tagsJSON, &agent, &r.CreatedAt, &sessionID, &anchorSeq, &chunkID); err != nil {
 			return nil, err
 		}
 		r.Agent = agent.String
+		if sessionID.Valid && anchorSeq.Valid {
+			r.SessionID, r.AnchorSeq, r.HasSource = sessionID.String, int(anchorSeq.Int64), true
+			r.SourceChunkID = chunkID.Int64
+		}
 		// tags is CHECKed as a JSON array in the schema, so this can only
 		// fail if the column itself is somehow malformed — degrade to an
 		// empty list rather than fail the whole search over one bad row.

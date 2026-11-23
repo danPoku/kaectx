@@ -133,6 +133,9 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := migrateCandidateProject(db); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := migrateNoteAnchor(db); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
 }
 
@@ -247,6 +250,16 @@ func migrateInferredOpens(db *sql.DB) error {
 func migrateCandidateProject(db *sql.DB) error {
 	return addColumns(db, 17, "candidate_project", "retrieval_candidates",
 		column{"project_id", "INTEGER REFERENCES projects(id) ON DELETE SET NULL"})
+}
+
+// migrateNoteAnchor is migration 018: notes.anchor_seq is the first message of
+// the exchange a note was saved in. With notes.session_id (in the schema
+// since 001, never written until now) it says where a note came from, the
+// way a memory_observation's anchor says which exchange it judged. Both stay
+// NULL for a note whose save_note call has not been found in any ingested
+// log; `ctx repair notes` fills them for notes saved before this existed.
+func migrateNoteAnchor(db *sql.DB) error {
+	return addColumns(db, 18, "note_anchor", "notes", column{"anchor_seq", "INTEGER"})
 }
 
 // addColumns is the shared shape of the ALTER-based migrations. It lives in
