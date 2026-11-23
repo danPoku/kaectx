@@ -181,6 +181,9 @@ func replay(ctx context.Context, db *sql.DB, client embed.Embedder, r recorded) 
 			sql.Named("query", search.SanitizeFTS5Query(r.query)),
 			sql.Named("query_embedding", string(vecJSON)),
 			sql.Named("project_id", r.projectID),
+			// Recorded searches are replayed in the scope they ran in: the
+			// project's own. Telemetry does not say which ran with scope=all.
+			sql.Named("all_projects", 0),
 			sql.Named("max_distance", search.MaxSemanticDistance),
 			sql.Named("limit", r.limit),
 			sql.Named("sem_k", semK),
