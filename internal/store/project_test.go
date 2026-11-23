@@ -173,8 +173,8 @@ func TestResolveProjectIsSpellingBlind(t *testing.T) {
 func TestLookupProjectPicksLowerIDWhenSpellingsWereSplit(t *testing.T) {
 	db := migratedTestDB(t)
 	var ids []int64
-	for _, p := range []string{"/mnt/c/Users/dev/NIORA", `C:\Users\dev\NIORA`} {
-		res, err := db.Exec(`INSERT INTO projects(name) VALUES ('NIORA')`)
+	for _, p := range []string{"/mnt/c/Users/dev/REPO", `C:\Users\dev\REPO`} {
+		res, err := db.Exec(`INSERT INTO projects(name) VALUES ('REPO')`)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -184,7 +184,7 @@ func TestLookupProjectPicksLowerIDWhenSpellingsWereSplit(t *testing.T) {
 		}
 		ids = append(ids, id)
 	}
-	for _, spelling := range []string{"/mnt/c/Users/dev/NIORA", `C:\Users\dev\NIORA`, `c:\users\dev\niora\api`} {
+	for _, spelling := range []string{"/mnt/c/Users/dev/REPO", `C:\Users\dev\REPO`, `c:\users\dev\repo\api`} {
 		got, ok, err := LookupProject(db, spelling)
 		if err != nil || !ok || got != ids[0] {
 			t.Errorf("LookupProject(%q) = %d, %v, %v; want %d, true, nil", spelling, got, ok, err, ids[0])
