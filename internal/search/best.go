@@ -38,6 +38,10 @@ type Result struct {
 	LastSeq   int
 	Score     float64
 	ScoreKind string
+	// ProjectID and ProjectName are the hit's own project. They differ from
+	// the caller's only when the search ran with Scope.AllProjects.
+	ProjectID   int64
+	ProjectName string
 	// Reliability and PolicyScore are populated by opt-in risk-aware search.
 	// GovernanceNeutral means there was too little outcome evidence to adjust
 	// this result; its multiplier is exactly 1.
@@ -83,20 +87,25 @@ func Best(ctx context.Context, db *sql.DB, client embed.Embedder, query string, 
 
 // BestIn is Best limited to turns inside w.
 func BestIn(ctx context.Context, db *sql.DB, client embed.Embedder, query string, projectID int64, agent string, w Window, limit int) (BestResult, error) {
+	return BestScoped(ctx, db, client, query, Scope{ProjectID: projectID}, agent, w, limit)
+}
+
+// BestScoped is BestIn over a Scope: one project, or all of them.
+func BestScoped(ctx context.Context, db *sql.DB, client embed.Embedder, query string, scope Scope, agent string, w Window, limit int) (BestResult, error) {
 	var fallbackReason error
 	if client != nil {
-		hy, err := HybridIn(ctx, db, client, query, projectID, agent, w, limit)
+		hy, err := HybridScoped(ctx, db, client, query, scope, agent, w, limit)
 		if err == nil {
 			out := make([]Result, len(hy))
 			for i, r := range hy {
-				out[i] = Result{ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent, StartedAt: r.StartedAt, At: r.At, Snippet: r.Preview, FirstSeq: r.FirstSeq, LastSeq: r.LastSeq, Score: r.Score, ScoreKind: "rrf"}
+				out[i] = Result{ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent, StartedAt: r.StartedAt, At: r.At, Snippet: r.Preview, FirstSeq: r.FirstSeq, LastSeq: r.LastSeq, Score: r.Score, ScoreKind: "rrf", ProjectID: r.ProjectID, ProjectName: r.ProjectName}
 			}
 			return BestResult{Results: out, UsedHybrid: true}, nil
 		}
 		fallbackReason = err
 	}
 
-	kw, err := KeywordIn(db, query, projectID, agent, w, limit)
+	kw, err := KeywordScoped(db, query, scope, agent, w, limit)
 	if err != nil {
 		return BestResult{}, err
 	}
@@ -120,11 +129,20 @@ func BestTrackedWithPolicy(ctx context.Context, db *sql.DB, client embed.Embedde
 
 // BestTrackedIn is BestTrackedWithPolicy limited to turns inside w.
 func BestTrackedIn(ctx context.Context, db *sql.DB, client embed.Embedder, query string, projectID int64, agent string, w Window, limit int, surface string, riskAware bool) (BestResult, error) {
+	return BestTrackedScoped(ctx, db, client, query, Scope{ProjectID: projectID}, agent, w, limit, surface, riskAware)
+}
+
+// BestTrackedScoped is BestTrackedIn over a Scope. With Scope.AllProjects the
+// run is still recorded under the caller's project, and each candidate stores
+// the project it actually came from, so a later read or label can be tied to
+// the right one.
+func BestTrackedScoped(ctx context.Context, db *sql.DB, client embed.Embedder, query string, scope Scope, agent string, w Window, limit int, surface string, riskAware bool) (BestResult, error) {
+	projectID := scope.ProjectID
 	if limit <= 0 {
 		limit = 10
 	}
 	started := time.Now()
-	got, err := BestIn(ctx, db, client, query, projectID, agent, w, limit)
+	got, err := BestScoped(ctx, db, client, query, scope, agent, w, limit)
 	if err != nil {
 		return got, err
 	}
@@ -144,16 +162,39 @@ func BestTrackedIn(ctx context.Context, db *sql.DB, client embed.Embedder, query
 	return got, nil
 }
 
-func applyGovernance(ctx context.Context, db *sql.DB, projectID int64, results []Result) error {
+// applyGovernance reranks results by reliability. Each hit is assessed
+// against its OWN project's observations: under an all-projects search the
+// hits are grouped by project and each group assessed separately, so a label
+// recorded in one project can never move another project's evidence, and
+// nothing (observations, counts, the prior) is pooled. Like a claims record,
+// which follows the policy it was made on, not the branch that looked it up.
+//
+// A hit therefore gets exactly the reliability a project-scoped search in its
+// own project would give it. fallbackProject covers results that carry no
+// project of their own.
+func applyGovernance(ctx context.Context, db *sql.DB, fallbackProject int64, results []Result) error {
 	keys := make([]string, len(results))
-	evidence := make([]governance.Evidence, len(results))
+	byProject := map[int64][]governance.Evidence{}
 	for i, r := range results {
 		keys[i] = evidenceKey(r)
-		evidence[i] = governance.Evidence{Key: keys[i], SessionID: r.SessionID, FirstSeq: r.FirstSeq, LastSeq: r.LastSeq}
+		project := r.ProjectID
+		if project == 0 {
+			project = fallbackProject
+		}
+		byProject[project] = append(byProject[project],
+			governance.Evidence{Key: keys[i], SessionID: r.SessionID, FirstSeq: r.FirstSeq, LastSeq: r.LastSeq})
 	}
-	assessments, err := governance.AssessMany(ctx, db, projectID, evidence)
-	if err != nil {
-		return err
+	// Evidence keys are built from the session ID, and a session belongs to
+	// one project, so the per-project maps cannot collide when merged.
+	assessments := make(map[string]governance.Assessment, len(results))
+	for project, evidence := range byProject {
+		got, err := governance.AssessMany(ctx, db, project, evidence)
+		if err != nil {
+			return err
+		}
+		for k, a := range got {
+			assessments[k] = a
+		}
 	}
 	// Build a complete copy first: assessment failures must leave both order
 	// and metadata untouched so fail-open telemetry remains truthful.
@@ -204,8 +245,8 @@ func recordRetrieval(ctx context.Context, db *sql.DB, query string, projectID in
 	}
 	for i, r := range got.Results {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO retrieval_candidates
-			(run_id, rank, evidence_key, chunk_id, session_id, first_seq, last_seq, score, score_kind, original_rank, policy_applied, reliability, policy_score, governance_neutral)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, runID, i+1, evidenceKey(r), nullableChunkID(r.ChunkID), r.SessionID, r.FirstSeq, r.LastSeq, r.Score, r.ScoreKind, nullableOriginalRank(r), r.GovernanceEvaluated, nullableReliability(r), nullablePolicyScore(r), nullableNeutral(r)); err != nil {
+			(run_id, rank, evidence_key, chunk_id, session_id, first_seq, last_seq, score, score_kind, original_rank, policy_applied, reliability, policy_score, governance_neutral, project_id)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, runID, i+1, evidenceKey(r), nullableChunkID(r.ChunkID), r.SessionID, r.FirstSeq, r.LastSeq, r.Score, r.ScoreKind, nullableOriginalRank(r), r.GovernanceEvaluated, nullableReliability(r), nullablePolicyScore(r), nullableNeutral(r), nullableProjectID(r.ProjectID)); err != nil {
 			return "", err
 		}
 	}
@@ -227,6 +268,16 @@ func recordRetrieval(ctx context.Context, db *sql.DB, query string, projectID in
 		}
 	}
 	return runID, tx.Commit()
+}
+
+// nullableProjectID stores a hit's project, or NULL when the hit carries
+// none. A NULL reads as "the run's own project", which is also what every
+// candidate recorded before the column existed means.
+func nullableProjectID(id int64) any {
+	if id == 0 {
+		return nil
+	}
+	return id
 }
 
 func nullableChunkID(id int64) any {
@@ -279,7 +330,7 @@ func evidenceKey(r Result) string {
 func toResults(kw []KeywordResult) []Result {
 	out := make([]Result, len(kw))
 	for i, r := range kw {
-		out[i] = Result{ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent, StartedAt: r.StartedAt, At: r.At, Snippet: r.Snippet, FirstSeq: r.FirstSeq, LastSeq: r.LastSeq, Score: r.BM25, ScoreKind: "bm25"}
+		out[i] = Result{ChunkID: r.ChunkID, SessionID: r.SessionID, Agent: r.Agent, StartedAt: r.StartedAt, At: r.At, Snippet: r.Snippet, FirstSeq: r.FirstSeq, LastSeq: r.LastSeq, Score: r.BM25, ScoreKind: "bm25", ProjectID: r.ProjectID, ProjectName: r.ProjectName}
 	}
 	return out
 }
