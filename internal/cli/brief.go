@@ -28,11 +28,15 @@ func runBrief(args []string) error {
 	fs := flag.NewFlagSet("brief", flag.ContinueOnError)
 	budget := fs.Int("budget", brief.DefaultBudget, "largest size of the brief, in tokens")
 	hook := fs.Bool("hook", false, "run as an agent's session-start hook: record the delivery, and never fail or print an error")
-	if *hook {
+	// Whether this is a hook has to be known before the flags are parsed,
+	// because a parse error is itself something a hook must not print: the
+	// flag package writes the error and the usage text as it fails.
+	asHook := hookRequested(args)
+	if asHook {
 		fs.SetOutput(io.Discard)
 	}
 	if err := fs.Parse(args); err != nil {
-		if hookRequested(args) {
+		if asHook {
 			return nil
 		}
 		return err
