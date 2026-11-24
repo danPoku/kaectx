@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -54,7 +55,14 @@ func topLevelKeys(t *testing.T, data []byte) []string {
 func TestEnsureClaudeBriefHookKeepsEverythingElse(t *testing.T) {
 	home := t.TempDir()
 	path := writeSettings(t, home, existingSettings)
-	exe := `C:\Users\a b\go\bin\kae.exe`
+	// A path with a space in it, in the form this system writes paths. On
+	// Windows that means backslashes, which must reach the hook as forward
+	// slashes; elsewhere a backslash is an ordinary character and the path
+	// is used as it is.
+	exe, wantCommand := "/Users/a b/bin/kae", `"/Users/a b/bin/kae" brief --hook`
+	if runtime.GOOS == "windows" {
+		exe, wantCommand = `C:\Users\a b\go\bin\kae.exe`, `"C:/Users/a b/go/bin/kae.exe" brief --hook`
+	}
 
 	changes, err := EnsureClaudeBriefHook(home, exe, false)
 	if err != nil {
@@ -91,10 +99,9 @@ func TestEnsureClaudeBriefHookKeepsEverythingElse(t *testing.T) {
 	if len(start) != 1 || len(start[0].Hooks) != 1 {
 		t.Fatalf("SessionStart hook not added: %+v", start)
 	}
-	// Forward slashes and quotes, so the command survives Git Bash and a
-	// path with a space in it.
-	if want := `"C:/Users/a b/go/bin/kae.exe" brief --hook`; start[0].Hooks[0].Command != want || start[0].Hooks[0].Type != "command" {
-		t.Errorf("hook command = %+v, want %s", start[0].Hooks[0], want)
+	// Quoted, so the command survives a path with a space in it.
+	if start[0].Hooks[0].Command != wantCommand || start[0].Hooks[0].Type != "command" {
+		t.Errorf("hook command = %+v, want %s", start[0].Hooks[0], wantCommand)
 	}
 	if backup, err := os.ReadFile(path + ".kae-backup"); err != nil || string(backup) != existingSettings {
 		t.Errorf("backup missing or not the original: %v", err)
