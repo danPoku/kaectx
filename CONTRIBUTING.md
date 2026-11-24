@@ -121,10 +121,70 @@ tag ships.
   `kae repair` command is needed afterwards. Test both a fresh `kae init` and
   an upgrade from the previous release's database.
 - **MCP tools.** Tool names, arguments and output fields are what connected
-  agents depend on. Call out any rename or removal in the PR; it makes the next
-  release a minor bump.
+  agents depend on, and they are versioned: see
+  [The MCP contract](#the-mcp-contract). CI fails if they change without the
+  contract version changing with them.
 - **Adapters.** Add a real, redacted fixture to the adapter's `testdata/` before
   changing its parsing.
+
+## The MCP contract
+
+Agent prompts and scripts are written against the names of kae's MCP tools,
+their arguments and the fields of their results. That shape has its own
+version, `ContractVersion` in `internal/mcpserver/contract.go`, written
+`major.minor`. Agents are told it in the server's instructions, and
+`kae doctor` prints it as `contract_version`.
+
+The rules:
+
+- **An addition is a minor bump.** A new tool, a new optional argument, a new
+  result field. Anything written against the older shape still works.
+- **A removal or a rename is a major bump, and waits for one.** So does
+  making an argument required, changing a field's type, or changing what an
+  existing field means. None of these happens in a minor release.
+- **Deprecate first.** Before something is removed it spends at least one
+  release still working and marked deprecated, in the tool's description and
+  in the README's Tools table, with what to use instead. `retrieval_run_id`
+  (use `run_id`) is in that state now.
+- **Wording is free.** Descriptions of tools and fields can be improved at
+  any time; they are not part of the shape.
+
+`internal/mcpserver/testdata/contract.json` records the shape, and
+`TestContract` compares the running server with it. To change the contract:
+
+1. Make the change, and raise `ContractVersion`.
+2. Record the new shape:
+
+   ```
+   go test -tags sqlite_fts5 ./internal/mcpserver -run TestContract -update
+   ```
+
+   `-update` refuses to record a changed shape under an unchanged version.
+3. Say what changed in the PR, under Compatibility.
+
+While the contract's major number is 0 it is not yet promised stable, which
+is what "expect breaking changes in 0.x" means for agents. Even so, the rules
+above are followed from now on, so that 1.0 is a declaration and not a
+change of habit.
+
+### What 1.0 requires
+
+kae 1.0, and with it contract 1.0, is declared when all of these hold:
+
+- [ ] The MCP contract has gone two consecutive minor releases with no
+      removal or rename, and every field deprecated before then is removed.
+- [ ] A database from each of the last two minor releases upgrades in place,
+      with a backup taken first (#74), tested against a real file from each.
+- [ ] Prebuilt binaries are published for Linux, macOS and Windows (#59),
+      and each has been run against real agent logs on its own system,
+      macOS included (#58).
+- [ ] Both adapters report line types they do not recognise (#63), and each
+      has fixtures from the agent's current release.
+- [ ] A person can see, correct and remove what is stored (#66).
+- [ ] The README's Limitations lists no item that loses or corrupts data.
+
+After 1.0, a schema migration no longer forces a minor bump of the program
+on its own; a contract major bump forces a major bump of the program.
 
 ## Releasing
 
