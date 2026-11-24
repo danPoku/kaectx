@@ -137,6 +137,7 @@ func run(db *sql.DB, adapter Adapter, path string, git *store.GitResolver) error
 	}
 	touched := map[string]bool{}
 	unknown := unknownTally{} // lines skipped because their type is not recognised
+	door := newGate(db)       // forgotten sessions and excluded projects are not stored
 	var lastErr string
 	consumed := byteOffset
 
@@ -158,7 +159,7 @@ func run(db *sql.DB, adapter Adapter, path string, git *store.GitResolver) error
 		if len(bytes.TrimSpace(trimmed)) == 0 {
 			continue
 		}
-		sid, err := processLine(db, adapter, git, trimmed, toolNames, sessionSeq, purged, unknown)
+		sid, err := processLine(db, adapter, git, trimmed, toolNames, sessionSeq, purged, unknown, door)
 		if err != nil {
 			lastErr = err.Error()
 			continue
@@ -184,6 +185,12 @@ func run(db *sql.DB, adapter Adapter, path string, git *store.GitResolver) error
 	// source and never stops the ingest.
 	if err := recordUnknown(db, src.ID, adapter.Agent(), rewound, unknown); err != nil {
 		lastErr = err.Error()
+	}
+
+	if door.skippedExcluded {
+		if _, err := db.Exec(`UPDATE sources SET skipped_excluded = 1 WHERE id = ?`, src.ID); err != nil {
+			lastErr = err.Error()
+		}
 	}
 
 	newHeadHash, err := headHashUpTo(f, consumed)
@@ -228,7 +235,7 @@ func headHashUpTo(f *os.File, offset int64) (string, error) {
 // chunking afterward), or "" if the line carried no session information at
 // all (shouldn't happen for a well-formed conversational or ai-title line,
 // but Skip lines legitimately return "").
-func processLine(db *sql.DB, adapter Adapter, git *store.GitResolver, line []byte, toolNames map[string]string, sessionSeq map[string]int, purged map[string]bool, unknown unknownTally) (string, error) {
+func processLine(db *sql.DB, adapter Adapter, git *store.GitResolver, line []byte, toolNames map[string]string, sessionSeq map[string]int, purged map[string]bool, unknown unknownTally, door *gate) (string, error) {
 	res, err := adapter.ParseLine(line)
 	if err != nil {
 		return "", err
@@ -238,6 +245,11 @@ func processLine(db *sql.DB, adapter Adapter, git *store.GitResolver, line []byt
 			sessionID := ""
 			if res.Session.NativeID != "" {
 				sessionID = adapter.Agent() + ":" + res.Session.NativeID
+				// Nothing is kept about a forgotten or excluded session,
+				// not even a count of its unreadable lines.
+				if closed, err := door.closed(sessionID, res.Session.CWD); err != nil || closed {
+					return "", err
+				}
 			}
 			unknown.add(sessionID, res.Unknown, res.Session.Version, res.Session.Timestamp)
 		}
@@ -256,6 +268,11 @@ func processLine(db *sql.DB, adapter Adapter, git *store.GitResolver, line []byt
 	}
 
 	sessionID := adapter.Agent() + ":" + res.Session.NativeID
+	// The door is checked before the upsert, which is what would create the
+	// session's row (and, for a new folder, its project).
+	if closed, err := door.closed(sessionID, res.Session.CWD); err != nil || closed {
+		return "", err
+	}
 	projectID, err := upsertSession(db, sessionID, adapter.Agent(), res.Session, res.Message)
 	if err != nil {
 		return sessionID, err

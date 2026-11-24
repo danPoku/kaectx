@@ -101,6 +101,16 @@ func Main() {
 			fmt.Fprintln(os.Stderr, "kae resume:", err)
 			os.Exit(1)
 		}
+	case "forget":
+		if err := runForget(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "kae forget:", err)
+			os.Exit(1)
+		}
+	case "ui":
+		if err := runUI(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "kae ui:", err)
+			os.Exit(1)
+		}
 	case "setup":
 		if err := runSetup(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "kae setup:", err)
@@ -142,6 +152,9 @@ commands:
   repair projects [--dry-run]         re-file Claude Code sessions under the project their main transcript starts in
   repair notes [--dry-run]            link saved notes to the exchange they were saved in, from messages already stored
   project list | merge <from> <into>  list projects, or fold a duplicate (e.g. from a deleted checkout) into another
+  project exclude <id> [--forget] | include <id>   stop (or resume) ingesting a project; --forget also deletes what is stored
+  forget <session-id> [--yes]         delete a session and everything stored from it; it is never ingested again
+  ui [--port N] [--allow-edits]       browse what kae holds in a local web page (read-only unless --allow-edits)
   audit-secrets                       re-scan stored text with the redaction rules and report residual secrets
   doctor                              report ingestion, embedding, retrieval, and outcome health
   mcp                                 serve kae's tools over MCP (stdio) for an agent to call
