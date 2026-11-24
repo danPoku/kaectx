@@ -1,0 +1,272 @@
+// Copyright 2026 Dan Gyinaye Poku
+// SPDX-License-Identifier: Apache-2.0
+
+// Command pkgmanifests writes the package-manager manifests for one kae
+// release: a Homebrew formula, a Scoop manifest and the three winget
+// manifest files. The release workflow runs it after the archives are
+// published, and pushes the results to the tap repository and to winget.
+//
+//	go run ./scripts/pkgmanifests -version v0.3.0 -sums dist/SHA256SUMS -out out
+//
+// It writes:
+//
+//	out/Formula/kae.rb                                   Homebrew
+//	out/bucket/kae.json                                  Scoop
+//	out/winget/danPoku.kae.yaml                          winget (version)
+//	out/winget/danPoku.kae.installer.yaml                winget (installer)
+//	out/winget/danPoku.kae.locale.en-US.yaml             winget (default locale)
+//
+// Every manifest points at the archives attached to the GitHub release and
+// carries their checksums from SHA256SUMS, the same file the install scripts
+// verify against. So all install routes hand out the same bytes, and a
+// package manager refuses a file that differs from what the release built.
+package main
+
+import (
+	"bufio"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+const (
+	repo        = "danPoku/kaectx"
+	homepage    = "https://github.com/" + repo
+	description = "One local memory for every coding agent on your machine"
+	license     = "Apache-2.0"
+	wingetID    = "danPoku.kae"
+	publisher   = "Dan Gyinaye Poku"
+)
+
+// archives are the files a release must have. A manifest that silently left
+// one platform out would install nothing there, so a missing checksum is an
+// error rather than a gap.
+var archives = []string{
+	"kae_darwin_arm64.tar.gz",
+	"kae_darwin_amd64.tar.gz",
+	"kae_linux_arm64.tar.gz",
+	"kae_linux_amd64.tar.gz",
+	"kae_windows_amd64.zip",
+}
+
+func main() {
+	version := flag.String("version", "", "release tag, e.g. v0.3.0")
+	sums := flag.String("sums", "", "path to the release's SHA256SUMS file")
+	out := flag.String("out", "", "directory to write the manifests into")
+	flag.Parse()
+	if *version == "" || *sums == "" || *out == "" {
+		flag.Usage()
+		os.Exit(2)
+	}
+	if err := run(*version, *sums, *out); err != nil {
+		fmt.Fprintln(os.Stderr, "pkgmanifests:", err)
+		os.Exit(1)
+	}
+}
+
+func run(tag, sumsPath, out string) error {
+	version, err := parseVersion(tag)
+	if err != nil {
+		return err
+	}
+	f, err := os.Open(sumsPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	sums, err := parseSums(f)
+	if err != nil {
+		return err
+	}
+	for _, a := range archives {
+		if sums[a] == "" {
+			return fmt.Errorf("%s has no checksum for %s", sumsPath, a)
+		}
+	}
+	r := release{Tag: tag, Version: version, Sums: sums}
+	files := map[string]string{
+		filepath.Join("Formula", "kae.rb"):                     r.formula(),
+		filepath.Join("bucket", "kae.json"):                    r.scoop(),
+		filepath.Join("winget", wingetID+".yaml"):              r.wingetVersion(),
+		filepath.Join("winget", wingetID+".installer.yaml"):    r.wingetInstaller(),
+		filepath.Join("winget", wingetID+".locale.en-US.yaml"): r.wingetLocale(),
+	}
+	for name, content := range files {
+		path := filepath.Join(out, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var semver = regexp.MustCompile(`^v(\d+\.\d+\.\d+)$`)
+
+// parseVersion turns a release tag into the bare version package managers
+// want. Only plain vX.Y.Z tags are accepted: a pre-release such as
+// v0.3.0-rc1 must not be pushed to people's package managers as an upgrade.
+func parseVersion(tag string) (string, error) {
+	m := semver.FindStringSubmatch(tag)
+	if m == nil {
+		return "", fmt.Errorf("version %q is not a plain vX.Y.Z release tag", tag)
+	}
+	return m[1], nil
+}
+
+var hex64 = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+
+// parseSums reads sha256sum output: "<hash>  <file>", where the file may be
+// prefixed with "*" (binary mode, which is what Windows tools write).
+func parseSums(f *os.File) (map[string]string, error) {
+	sums := map[string]string{}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) != 2 {
+			continue
+		}
+		if !hex64.MatchString(fields[0]) {
+			return nil, fmt.Errorf("not a SHA-256 checksum: %q", fields[0])
+		}
+		sums[strings.TrimPrefix(fields[1], "*")] = strings.ToLower(fields[0])
+	}
+	return sums, sc.Err()
+}
+
+type release struct {
+	Tag, Version string
+	Sums         map[string]string
+}
+
+func (r release) url(archive string) string {
+	return fmt.Sprintf("%s/releases/download/%s/%s", homepage, r.Tag, archive)
+}
+
+// formula is a Homebrew formula that installs the prebuilt binary for the
+// user's system, on macOS and on Linux (Homebrew runs on both).
+func (r release) formula() string {
+	block := func(archive string) string {
+		return fmt.Sprintf("      url %q\n      sha256 %q\n", r.url(archive), r.Sums[archive])
+	}
+	return `# Generated by scripts/pkgmanifests in ` + repo + ` for each release. Do not edit by hand.
+class Kae < Formula
+  desc "` + description + `"
+  homepage "` + homepage + `"
+  version "` + r.Version + `"
+  license "` + license + `"
+
+  on_macos do
+    on_arm do
+` + block("kae_darwin_arm64.tar.gz") + `    end
+    on_intel do
+` + block("kae_darwin_amd64.tar.gz") + `    end
+  end
+
+  on_linux do
+    on_arm do
+` + block("kae_linux_arm64.tar.gz") + `    end
+    on_intel do
+` + block("kae_linux_amd64.tar.gz") + `    end
+  end
+
+  def install
+    bin.install "kae"
+  end
+
+  test do
+    assert_match "kae v#{version}", shell_output("#{bin}/kae version")
+  end
+end
+`
+}
+
+// scoop is a Scoop manifest. checkver and autoupdate let Scoop's own tools
+// find a newer release too, but the release workflow regenerates the file
+// each time, so they are a fallback rather than the mechanism.
+func (r release) scoop() string {
+	const zip = "kae_windows_amd64.zip"
+	return `{
+    "version": "` + r.Version + `",
+    "description": "` + description + `",
+    "homepage": "` + homepage + `",
+    "license": "` + license + `",
+    "architecture": {
+        "64bit": {
+            "url": "` + r.url(zip) + `",
+            "hash": "` + r.Sums[zip] + `"
+        }
+    },
+    "bin": "kae.exe",
+    "checkver": {
+        "github": "` + homepage + `"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "` + homepage + `/releases/download/v$version/` + zip + `"
+            }
+        },
+        "hash": {
+            "url": "$baseurl/SHA256SUMS"
+        }
+    }
+}
+`
+}
+
+const wingetSchema = "1.6.0"
+
+func (r release) wingetHeader(kind string) string {
+	return "# yaml-language-server: $schema=https://aka.ms/winget-manifest." + kind + "." + wingetSchema + ".schema.json\n" +
+		"PackageIdentifier: " + wingetID + "\n" +
+		"PackageVersion: " + r.Version + "\n"
+}
+
+func (r release) wingetVersion() string {
+	return r.wingetHeader("version") +
+		"DefaultLocale: en-US\n" +
+		"ManifestType: version\n" +
+		"ManifestVersion: " + wingetSchema + "\n"
+}
+
+// wingetInstaller describes the zip as a portable package: winget unpacks
+// it and puts kae.exe on PATH under the alias `kae`. winget writes checksums
+// in upper case.
+func (r release) wingetInstaller() string {
+	const zip = "kae_windows_amd64.zip"
+	return r.wingetHeader("installer") +
+		"InstallerType: zip\n" +
+		"NestedInstallerType: portable\n" +
+		"NestedInstallerFiles:\n" +
+		"- RelativeFilePath: kae.exe\n" +
+		"  PortableCommandAlias: kae\n" +
+		"Installers:\n" +
+		"- Architecture: x64\n" +
+		"  InstallerUrl: " + r.url(zip) + "\n" +
+		"  InstallerSha256: " + strings.ToUpper(r.Sums[zip]) + "\n" +
+		"ManifestType: installer\n" +
+		"ManifestVersion: " + wingetSchema + "\n"
+}
+
+func (r release) wingetLocale() string {
+	return r.wingetHeader("defaultLocale") +
+		"PackageLocale: en-US\n" +
+		"Publisher: " + publisher + "\n" +
+		"PublisherUrl: https://github.com/danPoku\n" +
+		"PackageName: kae\n" +
+		"PackageUrl: " + homepage + "\n" +
+		"License: " + license + "\n" +
+		"LicenseUrl: " + homepage + "/blob/master/LICENSE\n" +
+		"ShortDescription: " + description + "\n" +
+		"Moniker: kae\n" +
+		"Tags:\n- ai\n- claude-code\n- codex\n- mcp\n- cli\n" +
+		"ReleaseNotesUrl: " + homepage + "/releases/tag/" + r.Tag + "\n" +
+		"ManifestType: defaultLocale\n" +
+		"ManifestVersion: " + wingetSchema + "\n"
+}

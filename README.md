@@ -118,6 +118,21 @@ Linux and macOS `kae` goes into `~/.local/bin`; on Windows into
 `v0.3.0`) to install a particular release. Run the script again to upgrade.
 `kae version` shows what is installed.
 
+### Package managers
+
+| | Install | Upgrade |
+| --- | --- | --- |
+| Homebrew (macOS, Linux) | `brew install danPoku/tap/kae` | `brew upgrade kae` |
+| Scoop (Windows) | `scoop bucket add danPoku https://github.com/danPoku/homebrew-tap` then `scoop install kae` | `scoop update kae` |
+| winget (Windows) | `winget install danPoku.kae` | `winget upgrade danPoku.kae` |
+
+All three install the same prebuilt binary as the scripts above, checked
+against the same checksums, and are updated by the release workflow on each
+release. A new version reaches winget once its pull request to
+`microsoft/winget-pkgs` is merged, which can take a day or two.
+
+### Manual download
+
 The archives can also be downloaded by hand from the release page:
 `kae_linux_amd64.tar.gz`, `kae_linux_arm64.tar.gz`, `kae_darwin_arm64.tar.gz`,
 `kae_darwin_amd64.tar.gz` and `kae_windows_amd64.zip`. The binaries are not

@@ -18,6 +18,7 @@ on:
       - .github/workflows/release.yml
       - install.sh
       - install.ps1
+      - scripts/pkgmanifests/**
   workflow_dispatch:
 
 permissions:
@@ -188,6 +189,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: kae_*
           merge-multiple: true
       - name: Checksums
         shell: bash
@@ -232,6 +234,44 @@ jobs:
           if (-not $refused) { throw 'install.ps1 accepted an archive with a wrong checksum' }
           if (Test-Path (Join-Path $env:KAE_INSTALL_DIR 'kae.exe')) { throw 'kae.exe installed despite the bad checksum' }
 
+  # Writes the Homebrew formula, the Scoop manifest and the winget manifests
+  # from the checksums of the archives just built. On a pull request this
+  # proves the generator still works against real archives; the manifests are
+  # kept as a workflow artifact either way, so they can be read before
+  # anything is pushed anywhere.
+  #
+  # Skipped for pre-release tags (v1.0.0-rc1): package managers would offer a
+  # release candidate to everyone as an upgrade.
+  manifests:
+    needs: build
+    if: github.ref_type != 'tag' || !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: kae_*
+          merge-multiple: true
+      - name: Generate
+        run: |
+          set -eu
+          (cd dist && sha256sum kae_* > SHA256SUMS)
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then version="${GITHUB_REF_NAME}"; else version="v0.0.0"; fi
+          go run ./scripts/pkgmanifests -version "$version" -sums dist/SHA256SUMS -out manifests
+          ruby -c manifests/Formula/kae.rb
+          python3 -m json.tool manifests/bucket/kae.json >/dev/null
+          cat manifests/Formula/kae.rb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-manifests
+          path: manifests
+          if-no-files-found: error
+
   publish:
     if: github.ref_type == 'tag'
     needs: [build, install-scripts]
@@ -242,6 +282,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: kae_*
           merge-multiple: true
       - name: Checksums
         run: cd dist && sha256sum kae_* > SHA256SUMS && cat SHA256SUMS
@@ -258,3 +299,73 @@ jobs:
             gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
           fi
           gh release upload "$TAG" dist/kae_* dist/SHA256SUMS --clobber
+
+  # Homebrew and Scoop both install from a git repository of manifests. One
+  # repository serves both: Homebrew reads Formula/ and Scoop reads bucket/.
+  # It runs after publish, because the manifests point at the release's files.
+  #
+  # Needs the secret TAP_GITHUB_TOKEN, a token that can push to
+  # danPoku/homebrew-tap (see CONTRIBUTING.md). Without it the step says so
+  # and passes, so a release is never blocked on a package manager.
+  tap:
+    if: github.ref_type == 'tag'
+    needs: [publish, manifests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-manifests
+          path: manifests
+      - name: Push the formula and the Scoop manifest
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          TAP_REPO: danPoku/homebrew-tap
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          if [ -z "${TAP_TOKEN}" ]; then
+            echo "::warning::TAP_GITHUB_TOKEN is not set; Homebrew and Scoop were not updated for ${TAG}."
+            exit 0
+          fi
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPO}.git" tap
+          mkdir -p tap/Formula tap/bucket
+          cp manifests/Formula/kae.rb tap/Formula/kae.rb
+          cp manifests/bucket/kae.json tap/bucket/kae.json
+          cd tap
+          git add Formula/kae.rb bucket/kae.json
+          if git diff --cached --quiet; then
+            echo "tap already at ${TAG}"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]"               -c user.email="41898282+github-actions[bot]@users.noreply.github.com"               commit -m "kae ${TAG}"
+          git push
+
+  # winget packages live in microsoft/winget-pkgs, and a new version is a pull
+  # request there, reviewed by their automation. wingetcreate opens it from a
+  # fork owned by the token's account.
+  #
+  # Needs the secret WINGET_GITHUB_TOKEN (a classic token with public_repo;
+  # see CONTRIBUTING.md). Without it the step says so and passes.
+  winget:
+    if: github.ref_type == 'tag'
+    needs: [publish, manifests]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-manifests
+          path: manifests
+      - name: Open the winget pull request
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:WINGET_TOKEN) {
+            Write-Host "::warning::WINGET_GITHUB_TOKEN is not set; no winget pull request was opened for $env:TAG."
+            exit 0
+          }
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          ./wingetcreate.exe submit --token $env:WINGET_TOKEN --prtitle "danPoku.kae version $($env:TAG.TrimStart('v'))" manifests/winget
+          if ($LASTEXITCODE -ne 0) { throw "wingetcreate submit failed with exit code $LASTEXITCODE" }
