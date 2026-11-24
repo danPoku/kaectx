@@ -275,7 +275,7 @@ func processLine(db *sql.DB, adapter Adapter, git *store.GitResolver, line []byt
 	// This only sees calls from earlier in THIS ingest run — if a call and
 	// its result straddle two separate one-shot runs (the file was ingested
 	// mid-turn), the name is lost. Acceptable for a one-shot batch ingester;
-	// closed properly once ctx daemon keeps this map alive continuously.
+	// closed properly once kae daemon keeps this map alive continuously.
 	if msg.Kind == "tool_result" {
 		if name, ok := toolNames[msg.ToolUseID]; ok {
 			msg.ToolName = name

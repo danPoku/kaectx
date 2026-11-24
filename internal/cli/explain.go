@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package cli
 
 import (
 	"flag"
@@ -22,7 +22,7 @@ func runExplain(args []string) error {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: ctx explain <project-relative-path> [--limit N]")
+		return fmt.Errorf("usage: kae explain <project-relative-path> [--limit N]")
 	}
 
 	db, _, err := openStore()

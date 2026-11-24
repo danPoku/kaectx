@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Command slowsearch is a read-only development tool for issue #44. It takes
-// the slowest recorded searches from a copy of a ctx database and replays
+// the slowest recorded searches from a copy of a kae database and replays
 // each one stage by stage, timing the query embedding, the keyword search,
 // the vector search and the fused query separately, so the stage behind the
 // slow tail can be named with numbers instead of guessed.
 //
-//	go run -tags sqlite_fts5 ./scripts/slowsearch -db /path/to/copy-of-ctx.db          # Ollama warm
-//	go run -tags sqlite_fts5 ./scripts/slowsearch -db /path/to/copy-of-ctx.db -cold    # model unloaded before each query
+//	go run -tags sqlite_fts5 ./scripts/slowsearch -db /path/to/copy-of-kae.db          # Ollama warm
+//	go run -tags sqlite_fts5 ./scripts/slowsearch -db /path/to/copy-of-kae.db -cold    # model unloaded before each query
 //
 // -cold asks Ollama to unload the embedding model before every query, which
 // is what a search finds after the model's keep-alive has run out. It affects
@@ -41,7 +41,7 @@ import (
 )
 
 func main() {
-	dbPath := flag.String("db", "", "path to a copy of ctx.db (opened read-only)")
+	dbPath := flag.String("db", "", "path to a copy of kae.db (opened read-only)")
 	n := flag.Int("n", 20, "how many of the slowest recorded searches to replay")
 	ollama := flag.String("ollama", embed.DefaultBaseURL, "Ollama base URL")
 	cold := flag.Bool("cold", false, "unload the embedding model before each query")

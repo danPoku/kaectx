@@ -22,8 +22,8 @@ import (
 )
 
 // Source is one agent's session tree: where it lives, and how to get a
-// fresh Adapter for it. Mirrors cmd/ctx's agentSource — kept as its own
-// type here so this package doesn't depend on cmd/ctx's path-resolution
+// fresh Adapter for it. Mirrors internal/cli's agentSource — kept as its own
+// type here so this package doesn't depend on internal/cli's path-resolution
 // concerns (home directory, per-agent subpaths), only on "here's a root and
 // an adapter factory".
 type Source struct {
@@ -91,7 +91,7 @@ func Run(ctx context.Context, db *sql.DB, sources []Source, fallbackInterval, de
 		case path := <-debounce.ready:
 			if src, ok := sourceFor(sources, path); ok {
 				if err := ingest.Run(db, src.NewAdapter(), path); err != nil {
-					log.Printf("ctx daemon: ingest %s: %v", path, err)
+					log.Printf("kae daemon: ingest %s: %v", path, err)
 				}
 			}
 
@@ -99,7 +99,7 @@ func Run(ctx context.Context, db *sql.DB, sources []Source, fallbackInterval, de
 			if !ok {
 				return nil
 			}
-			log.Printf("ctx daemon: watcher error: %v", err)
+			log.Printf("kae daemon: watcher error: %v", err)
 
 		case <-fallback.C:
 			for _, src := range sources {
@@ -117,12 +117,12 @@ func Run(ctx context.Context, db *sql.DB, sources []Source, fallbackInterval, de
 func runAllLogged(db *sql.DB, src Source) {
 	results, err := ingest.RunAll(db, src.NewAdapter, src.Root)
 	if err != nil {
-		log.Printf("ctx daemon: scan %s (%s): %v", src.Root, src.Agent, err)
+		log.Printf("kae daemon: scan %s (%s): %v", src.Root, src.Agent, err)
 		return
 	}
 	for _, r := range results {
 		if r.Err != nil {
-			log.Printf("ctx daemon: ingest %s: %v", r.Path, r.Err)
+			log.Printf("kae daemon: ingest %s: %v", r.Path, r.Err)
 		}
 	}
 }
@@ -138,7 +138,7 @@ func addWatchesRecursive(watcher *fsnotify.Watcher, root string) {
 		}
 		if d.IsDir() {
 			if err := watcher.Add(path); err != nil {
-				log.Printf("ctx daemon: watch %s: %v", path, err)
+				log.Printf("kae daemon: watch %s: %v", path, err)
 			}
 		}
 		return nil

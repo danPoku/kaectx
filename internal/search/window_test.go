@@ -65,7 +65,7 @@ func TestParseWindow(t *testing.T) {
 func seedWeek(t *testing.T, db *sql.DB, p int64) {
 	t.Helper()
 	// Inserted out of time order on purpose: chunk ids (insertion order)
-	// must not stand in for recency, because `ctx repair messages`
+	// must not stand in for recency, because `kae repair messages`
 	// re-inserts old sessions' chunks with the newest ids.
 	for _, s := range []struct{ id, agent, at string }{
 		{"s-week", "codex", "2026-09-29T10:00:00.000Z"},

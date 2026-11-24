@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package feedback records explicit outcomes for retrieved evidence. The MCP
-// record_retrieval_outcome tool and the `ctx feedback` command both write
+// record_retrieval_outcome tool and the `kae feedback` command both write
 // through Record, so validation, redaction and anchoring happen in one place
 // whichever way a label arrives. RecordSearch is the separate path for a
 // verdict on a whole search.

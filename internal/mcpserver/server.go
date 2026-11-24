@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-// Package mcpserver exposes ctx's retrieval and note-taking tools over MCP,
+// Package mcpserver exposes kae's retrieval and note-taking tools over MCP,
 // so an agent can pull its own (or another agent's) past context mid-session
 // instead of re-deriving it. Every tool response is a summary or a capped
 // page — progressive disclosure — never a full unbounded transcript dump,
@@ -20,8 +20,8 @@ import (
 )
 
 // server holds what every tool handler needs. projectID is resolved once,
-// from the directory `ctx mcp` was launched in — the same assumption
-// `ctx search` makes: a local stdio MCP server is spawned by the calling
+// from the directory `kae mcp` was launched in — the same assumption
+// `kae search` makes: a local stdio MCP server is spawned by the calling
 // agent from within the project it's working on, so the server's own
 // working directory IS the project.
 type server struct {
@@ -43,13 +43,13 @@ type Options struct {
 	// search_context and recent_sessions, and catches up again whenever a
 	// search finds unread logs.
 	Roots []ingest.Root
-	// LockPath is the file that keeps concurrent ctx processes from
+	// LockPath is the file that keeps concurrent kae processes from
 	// catching up at the same time; see ingest.CatchUp. Required with Roots.
 	LockPath string
 }
 
-// New builds the ctx MCP server and registers every tool. cwd is the
-// directory the `ctx mcp` process was launched from. embedClient backs
+// New builds the kae MCP server and registers every tool. cwd is the
+// directory the `kae mcp` process was launched from. embedClient backs
 // search_context's semantic half — callers construct it explicitly (rather
 // than New picking a default internally) so tests can inject a fake instead
 // of depending on whatever Ollama happens to be reachable at
@@ -72,8 +72,8 @@ func NewWithOptions(db *sql.DB, cwd string, embedClient embed.Embedder, opts Opt
 		s.startCatchUp()
 	}
 
-	srv := mcp.NewServer(&mcp.Implementation{Name: "ctx", Version: "0.2.0+dev"}, &mcp.ServerOptions{
-		Instructions: "Use ctx to recover prior work without loading whole transcripts. Use search_context then get_chunk for the smallest useful context (set scope to all when the work spans more than one repo): each hit's next_step is the exact get_chunk call, with the run_id and rank that record the exact open. When retrieved context influences an answer or action, call record_retrieval_outcome with that run ID and rank and an honest outcome; an open alone is never a helpful label. Every search also deserves one whole-search verdict: make the call in its outcome_next_step with helpful when the search answered the question (its snippets alone count), or partial or unhelpful with a reason when it missed context you needed. feedback_status and checkpoint_status list the searches still waiting as pending_searches. At natural milestones call feedback_status and checkpoint_status. If checkpoint_status recommends a checkpoint, tell the user and offer to save a handoff before continuing in a fresh session; never end or replace the session without the user's choice, and record that choice with record_checkpoint_outcome.",
+	srv := mcp.NewServer(&mcp.Implementation{Name: "kae", Version: "0.2.0+dev"}, &mcp.ServerOptions{
+		Instructions: "Use kae to recover prior work without loading whole transcripts. Use search_context then get_chunk for the smallest useful context (set scope to all when the work spans more than one repo): each hit's next_step is the exact get_chunk call, with the run_id and rank that record the exact open. When retrieved context influences an answer or action, call record_retrieval_outcome with that run ID and rank and an honest outcome; an open alone is never a helpful label. Every search also deserves one whole-search verdict: make the call in its outcome_next_step with helpful when the search answered the question (its snippets alone count), or partial or unhelpful with a reason when it missed context you needed. feedback_status and checkpoint_status list the searches still waiting as pending_searches. At natural milestones call feedback_status and checkpoint_status. If checkpoint_status recommends a checkpoint, tell the user and offer to save a handoff before continuing in a fresh session; never end or replace the session without the user's choice, and record that choice with record_checkpoint_outcome.",
 	})
 	s.registerSearch(srv)
 	s.registerChunk(srv)

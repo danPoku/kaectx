@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package paths handles paths recorded by agents on a different operating
-// system from the ctx process reading them. Session history can outlive a WSL
+// system from the kae process reading them. Session history can outlive a WSL
 // to Windows move, so filepath alone is not sufficient.
 package paths
 

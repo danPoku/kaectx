@@ -15,8 +15,8 @@ import (
 	"github.com/danPoku/kaectx/internal/mcpserver"
 )
 
-// secondServer connects another ctx MCP server to the same database, standing
-// in for a second `ctx mcp` process: a different agent session working in the
+// secondServer connects another kae MCP server to the same database, standing
+// in for a second `kae mcp` process: a different agent session working in the
 // same project.
 func secondServer(t *testing.T, db *sql.DB) *sdkmcp.ClientSession {
 	t.Helper()

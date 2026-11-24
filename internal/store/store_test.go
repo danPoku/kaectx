@@ -471,7 +471,7 @@ func mustExec(t *testing.T, db *sql.DB, q string, args ...any) {
 }
 
 // Migration 004: old file_touches rows must survive and read back as
-// "not rooted" (0), so `ctx repair git` knows to upgrade them.
+// "not rooted" (0), so `kae repair git` knows to upgrade them.
 func TestMigrateTouchRootedKeepsOldRowsUnrooted(t *testing.T) {
 	db := openTestDB(t)
 	mustExec(t, db, `CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL,

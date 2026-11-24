@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package cli
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 
 func runDoctor(args []string) error {
 	if len(args) != 0 {
-		return fmt.Errorf("usage: ctx doctor")
+		return fmt.Errorf("usage: kae doctor")
 	}
 	db, _, err := openStore()
 	if err != nil {
@@ -32,7 +32,7 @@ func runDoctor(args []string) error {
 		return fmt.Errorf("look up project for %s: %w", cwd, err)
 	}
 	if !ok {
-		return fmt.Errorf("no ctx project found for %s; ingest a session from this directory first", cwd)
+		return fmt.Errorf("no kae project found for %s; ingest a session from this directory first", cwd)
 	}
 	report, err := doctor.Collect(context.Background(), db, projectID)
 	if err != nil {
@@ -47,7 +47,7 @@ func formatDoctor(r doctor.Report) string {
 	if r.LastIngestedAt.Valid {
 		lastIngest = r.LastIngestedAt.String
 	}
-	return fmt.Sprintf(`ctx doctor: %s
+	return fmt.Sprintf(`kae doctor: %s
 
 ingestion
   sources (all projects): %d (%d with errors)

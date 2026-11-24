@@ -31,7 +31,7 @@ const (
 	// Usually right, unverifiable.
 	SourceHead = "head"
 	// SourceUnverified: a commit stored by an earlier build (some stamped HEAD
-	// at ingest time) that `ctx repair git` could not re-derive because the
+	// at ingest time) that `kae repair git` could not re-derive because the
 	// repository is gone. Kept, but do not lean on it.
 	SourceUnverified = "unverified"
 	// SourceLogged: the agent's own log carried the commit.
@@ -210,7 +210,7 @@ func (g *GitResolver) Root(dir string) string {
 // Anchoring at the repo root rather than at cwd matters because agents are
 // often launched from a subdirectory: with cwd-relative paths the same file
 // is "store.go" in one session and "internal/store/store.go" in another, and
-// `ctx explain` from the repo root can only ever find the second.
+// `kae explain` from the repo root can only ever find the second.
 //
 // A path outside the repository is returned exactly as given. When cwd is not
 // a git checkout at all, the root falls back to cwd, which is the behaviour

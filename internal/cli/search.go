@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package cli
 
 import (
 	"context"
@@ -33,7 +33,7 @@ func runSearch(args []string) error {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: ctx search <query> [--agent NAME] [--limit N] [--since DATE] [--until DATE] [--risk-aware] [--all-projects]")
+		return fmt.Errorf("usage: kae search <query> [--agent NAME] [--limit N] [--since DATE] [--until DATE] [--risk-aware] [--all-projects]")
 	}
 	query := strings.Join(fs.Args(), " ")
 	window, err := search.ParseWindow(*since, *until)
@@ -66,19 +66,19 @@ func runSearch(args []string) error {
 		return err
 	}
 	if got.FallbackReason != nil {
-		fmt.Fprintf(os.Stderr, "ctx search: semantic search unavailable, falling back to keyword-only: %v\n", got.FallbackReason)
+		fmt.Fprintf(os.Stderr, "kae search: semantic search unavailable, falling back to keyword-only: %v\n", got.FallbackReason)
 	}
 	if got.TelemetryErr != nil {
-		fmt.Fprintf(os.Stderr, "ctx search: warning: retrieval telemetry was not recorded: %v\n", got.TelemetryErr)
+		fmt.Fprintf(os.Stderr, "kae search: warning: retrieval telemetry was not recorded: %v\n", got.TelemetryErr)
 	}
 	if got.GovernanceErr != nil {
-		fmt.Fprintf(os.Stderr, "ctx search: warning: risk-aware reranking was not applied: %v\n", got.GovernanceErr)
+		fmt.Fprintf(os.Stderr, "kae search: warning: risk-aware reranking was not applied: %v\n", got.GovernanceErr)
 	}
 	// The CLI only warns; it never ingests on its own, because a search
 	// that silently turns into a multi-minute ingest would be surprising.
 	if home, err := os.UserHomeDir(); err == nil {
 		if f, err := ingest.CheckFreshness(db, ingestRoots(home), time.Now()); err == nil && f.PendingFiles > 0 {
-			fmt.Fprintf(os.Stderr, "ctx search: warning: %d session log file(s) not ingested yet (oldest from %s); results may be missing recent work. Run `ctx ingest`, or `ctx daemon` to stay current.\n",
+			fmt.Fprintf(os.Stderr, "kae search: warning: %d session log file(s) not ingested yet (oldest from %s); results may be missing recent work. Run `kae ingest`, or `kae daemon` to stay current.\n",
 				f.PendingFiles, f.OldestPendingAt)
 		}
 	}
@@ -87,7 +87,7 @@ func runSearch(args []string) error {
 }
 
 // formatSearch prints a search's hits. When the search was recorded, it leads
-// with the run ID and numbers each hit, which is what `ctx feedback` needs to
+// with the run ID and numbers each hit, which is what `kae feedback` needs to
 // label one. When telemetry failed there is no run to label, so neither the
 // run line nor the ranks appear. showProject adds each hit's project name,
 // for an all-projects search where hits from several repos are mixed.

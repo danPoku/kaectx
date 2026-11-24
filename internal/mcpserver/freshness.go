@@ -20,7 +20,7 @@ import (
 const catchUpCooldown = 2 * time.Minute
 
 // indexStatus is attached to search_context and recent_sessions results so
-// an agent can tell "nothing happened" from "ctx hasn't read it yet". It is
+// an agent can tell "nothing happened" from "kae hasn't read it yet". It is
 // omitted entirely when the server wasn't given any roots to check (tests,
 // or an embedding of the server that doesn't own ingest).
 type indexStatus struct {
@@ -33,10 +33,10 @@ type indexStatus struct {
 	Warning string `json:"warning,omitempty"`
 }
 
-// catchUp is the server's background-ingest state. A `ctx mcp` server runs
-// for as long as the agent session that spawned it, so it is the one ctx
+// catchUp is the server's background-ingest state. A `kae mcp` server runs
+// for as long as the agent session that spawned it, so it is the one kae
 // process guaranteed to be alive whenever an agent asks a question. If no
-// `ctx daemon` is running, nothing else keeps the index current; this
+// `kae daemon` is running, nothing else keeps the index current; this
 // lets the server close that gap itself instead of answering from a
 // days-old index.
 type catchUp struct {
@@ -78,7 +78,7 @@ func (s *server) startCatchUp() bool {
 		// holding the lock is the normal case with several sessions open
 		// or the daemon running, not worth a log line.
 		if err != nil && !errors.Is(err, ingest.ErrIngestBusy) {
-			fmt.Fprintf(os.Stderr, "ctx mcp: background catch-up: %v\n", err)
+			fmt.Fprintf(os.Stderr, "kae mcp: background catch-up: %v\n", err)
 		}
 		logFileFailures(results)
 		c.mu.Lock()
@@ -101,12 +101,12 @@ func logFileFailures(results []ingest.FileResult) {
 			continue
 		}
 		if failed < show {
-			fmt.Fprintf(os.Stderr, "ctx mcp: catch-up: %s: %v\n", r.Path, r.Err)
+			fmt.Fprintf(os.Stderr, "kae mcp: catch-up: %s: %v\n", r.Path, r.Err)
 		}
 		failed++
 	}
 	if failed > show {
-		fmt.Fprintf(os.Stderr, "ctx mcp: catch-up: %d more file(s) failed\n", failed-show)
+		fmt.Fprintf(os.Stderr, "kae mcp: catch-up: %d more file(s) failed\n", failed-show)
 	}
 }
 
@@ -123,7 +123,7 @@ func (s *server) indexStatus() *indexStatus {
 	}
 	f, err := ingest.CheckFreshness(s.db, s.catchUp.roots, time.Now())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ctx mcp: freshness check: %v\n", err)
+		fmt.Fprintf(os.Stderr, "kae mcp: freshness check: %v\n", err)
 		return nil
 	}
 	st := &indexStatus{LastIngestAt: f.LastIngestAt, PendingFiles: f.PendingFiles, OldestPendingAt: f.OldestPendingAt}
@@ -131,11 +131,11 @@ func (s *server) indexStatus() *indexStatus {
 		return st
 	}
 	st.CatchingUp = s.startCatchUp()
-	st.Warning = fmt.Sprintf("ctx has %d session log file(s) it hasn't read yet (oldest from %s), so these results may be missing recent work.",
+	st.Warning = fmt.Sprintf("kae has %d session log file(s) it hasn't read yet (oldest from %s), so these results may be missing recent work.",
 		f.PendingFiles, f.OldestPendingAt)
 	if st.CatchingUp {
 		st.Warning += " A background catch-up is running; retry in a minute."
 	}
-	st.Warning += " Run `ctx daemon` to keep the index current."
+	st.Warning += " Run `kae daemon` to keep the index current."
 	return st
 }

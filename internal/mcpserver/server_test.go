@@ -34,7 +34,7 @@ func (brokenEmbedder) Embed(context.Context, string) ([]float32, error) {
 	return nil, errors.New("no embedder configured for this test")
 }
 
-// testServer wires up a real ctx MCP server against a temp DB seeded with
+// testServer wires up a real kae MCP server against a temp DB seeded with
 // the claudecode fixture (cwd "/home/dev/proj"), connected in-process to a
 // real MCP client — no subprocess, but a genuine client/server MCP
 // round-trip (initialize handshake, JSON schema validation, wire encoding)

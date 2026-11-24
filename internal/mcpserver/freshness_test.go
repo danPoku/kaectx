@@ -35,7 +35,7 @@ type searchWithIndex struct {
 
 // staleServer starts a server over an EMPTY database whose agent log
 // directory holds one finished session that was never ingested: the state
-// a machine is in when nobody has run `ctx daemon` for a few days.
+// a machine is in when nobody has run `kae daemon` for a few days.
 func staleServer(t *testing.T, lockPath string) *sdkmcp.ClientSession {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "ctx.db"))

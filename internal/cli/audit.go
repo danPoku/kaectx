@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package cli
 
 import (
 	"errors"
@@ -11,11 +11,11 @@ import (
 	"github.com/danPoku/kaectx/internal/audit"
 )
 
-// errAuditFindings makes `ctx audit-secrets` exit non-zero when it found
+// errAuditFindings makes `kae audit-secrets` exit non-zero when it found
 // something, so it can gate a script or CI job. main prints the message.
 var errAuditFindings = errors.New("residual secrets found in stored text")
 
-// runAuditSecrets handles `ctx audit-secrets`: re-scan everything already in
+// runAuditSecrets handles `kae audit-secrets`: re-scan everything already in
 // the database with today's redaction rules and report what would still be
 // redacted. It only reports row locations and rule names, never the matched
 // text, and it changes nothing.

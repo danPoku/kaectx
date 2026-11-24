@@ -33,7 +33,7 @@ func Drain(ctx context.Context, db *sql.DB, client Embedder, batchSize int) (int
 // RunEvery drains the pending-chunk queue immediately and then again every
 // interval until ctx is cancelled. It is meant to run as a daemon goroutine
 // next to the ingest loop, so freshly ingested chunks become searchable
-// without anyone remembering to run `ctx embed`.
+// without anyone remembering to run `kae embed`.
 //
 // An error (Ollama not running, model not pulled) is reported through logf
 // and retried on the next tick rather than stopping the loop: the embedder is
@@ -46,18 +46,18 @@ func RunEvery(ctx context.Context, db *sql.DB, client Embedder, batchSize int, i
 	tick := func() {
 		n, err := Drain(ctx, db, client, batchSize)
 		if n > 0 {
-			logf("ctx daemon: embedded %d chunk(s)", n)
+			logf("kae daemon: embedded %d chunk(s)", n)
 		}
 		switch {
 		case ctx.Err() != nil:
 			// Shutting down: a cancelled request is not a real failure.
 		case err != nil:
 			if msg := err.Error(); msg != lastErr {
-				logf("ctx daemon: embedding paused, will retry every %s: %v", interval, err)
+				logf("kae daemon: embedding paused, will retry every %s: %v", interval, err)
 				lastErr = msg
 			}
 		case lastErr != "":
-			logf("ctx daemon: embedding recovered")
+			logf("kae daemon: embedding recovered")
 			lastErr = ""
 		}
 	}

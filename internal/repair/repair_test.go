@@ -285,7 +285,7 @@ func TestGitRepairRollsBackOnError(t *testing.T) {
 	}
 }
 
-// Sessions ingested before ctx read apply_patch have no file records; the
+// Sessions ingested before kae read apply_patch have no file records; the
 // patch text is still in messages.content and must be enough to rebuild them.
 func TestTouchesBackfillsCodexApplyPatchFromStoredMessages(t *testing.T) {
 	f := legacyDB(t)

@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package cli
 
 import (
 	"bytes"
@@ -21,7 +21,7 @@ func TestFormatSearchShowsRunAndRanks(t *testing.T) {
 		{Agent: "claude-code", SessionID: "claude-code:t", FirstSeq: 3, LastSeq: 4, Snippet: "second"},
 	}}
 	out := formatSearch(got, false)
-	for _, want := range []string{"run abc123", "ctx feedback abc123 <rank> <outcome>", "#1 [codex]", "#2 [claude-code]"} {
+	for _, want := range []string{"run abc123", "kae feedback abc123 <rank> <outcome>", "#1 [codex]", "#2 [claude-code]"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -31,7 +31,7 @@ func TestFormatSearchShowsRunAndRanks(t *testing.T) {
 	// no ranks that would suggest otherwise.
 	got.RunID = ""
 	out = formatSearch(got, false)
-	if strings.Contains(out, "run ") || strings.Contains(out, "ctx feedback") || strings.Contains(out, "#1") {
+	if strings.Contains(out, "run ") || strings.Contains(out, "kae feedback") || strings.Contains(out, "#1") {
 		t.Errorf("output without a run ID still offers labelling:\n%s", out)
 	}
 	if !strings.Contains(out, "[codex]") {

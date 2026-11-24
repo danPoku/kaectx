@@ -42,7 +42,7 @@ type Evidence struct {
 }
 
 // matchObservations is the one rule for which labels count toward a piece of
-// evidence, shared by Assess, AssessMany and ctx doctor's coverage report.
+// evidence, shared by Assess, AssessMany and kae doctor's coverage report.
 //
 // A label is anchored to the first message of the exchange it judged
 // (session_id, anchor_seq). It counts toward whichever exchange contains that
@@ -61,7 +61,7 @@ const matchObservations = `mo.project_id = ? AND (
 		(mo.anchor_seq IS NOT NULL AND mo.session_id = c.s AND mo.anchor_seq BETWEEN c.f AND c.l)
 		OR (mo.anchor_seq IS NULL AND mo.evidence_key = c.k))`
 
-// MatchObservationsSQL exposes matchObservations to ctx doctor, which must
+// MatchObservationsSQL exposes matchObservations to kae doctor, which must
 // count coverage by the same rule governance assesses by.
 func MatchObservationsSQL() string { return matchObservations }
 

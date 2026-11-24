@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package cli
 
 import (
 	"flag"
@@ -12,7 +12,7 @@ import (
 	"github.com/danPoku/kaectx/internal/store"
 )
 
-const repairUsage = "usage: ctx repair git|touches|messages|projects|notes [--dry-run]"
+const repairUsage = "usage: kae repair git|touches|messages|projects|notes [--dry-run]"
 
 func runRepair(args []string) error {
 	if len(args) == 0 || (args[0] != "git" && args[0] != "touches" && args[0] != "messages" && args[0] != "projects" && args[0] != "notes") {
@@ -102,7 +102,7 @@ func formatMessages(r repair.MessagesResult, dryRun bool) string {
 	if r.Unparseable > 0 {
 		out += fmt.Sprintf("          %d had nothing to re-read (empty prompts, or a raw line the adapter rejects); left as they were\n", r.Unparseable)
 	}
-	out += fmt.Sprintf("chunks:   rebuilt for %d sessions; new chunks are embedded by `ctx daemon` or `ctx embed`\n", r.Sessions)
+	out += fmt.Sprintf("chunks:   rebuilt for %d sessions; new chunks are embedded by `kae daemon` or `kae embed`\n", r.Sessions)
 	out += fmt.Sprintf("titles:   %s %d\n", verb, r.Titled)
 	if dryRun {
 		out += "dry run: nothing was written\n"
@@ -154,7 +154,7 @@ func formatTouches(r repair.TouchesResult, dryRun bool) string {
 	}
 	out += "\n"
 	if r.Pending > 0 {
-		out += fmt.Sprintf("          %d records are in directories that no longer exist; `ctx repair git` will settle their paths if the checkout returns\n", r.Pending)
+		out += fmt.Sprintf("          %d records are in directories that no longer exist; `kae repair git` will settle their paths if the checkout returns\n", r.Pending)
 	}
 	if dryRun {
 		out += "dry run: nothing was written\n"

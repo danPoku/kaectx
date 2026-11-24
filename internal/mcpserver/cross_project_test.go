@@ -30,7 +30,7 @@ type crossProject struct {
 	otherChnk int64
 }
 
-// serverAt connects a ctx MCP server started in cwd to db.
+// serverAt connects a kae MCP server started in cwd to db.
 func serverAt(t *testing.T, db *sql.DB, cwd string) *sdkmcp.ClientSession {
 	t.Helper()
 	srv, err := mcpserver.New(db, cwd, brokenEmbedder{})

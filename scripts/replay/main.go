@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Command replay is a read-only development tool for issue #37. It replays
-// every recorded search in a ctx database twice: once under today's
+// every recorded search in a kae database twice: once under today's
 // governance (a fixed prior of 1.0, neutral below three labels) and once
 // under a class-level prior, and reports whether the class prior would have
 // changed any result order and whether those changes agree with the labels
 // agents left.
 //
-// It changes nothing ctx ships and writes nothing: the database is opened
+// It changes nothing kae ships and writes nothing: the database is opened
 // with mode=ro, and the tool checks the file's size and modification time
 // before and after.
 //
-//	go run -tags sqlite_fts5 ./scripts/replay -db /path/to/copy-of-ctx.db
+//	go run -tags sqlite_fts5 ./scripts/replay -db /path/to/copy-of-kae.db
 //
 // Run it against a copy, not the live database: a copy is a fixed snapshot,
 // so two runs give the same report.
@@ -32,7 +32,7 @@ import (
 )
 
 func main() {
-	dbPath := flag.String("db", "", "path to a copy of ctx.db (opened read-only)")
+	dbPath := flag.String("db", "", "path to a copy of kae.db (opened read-only)")
 	project := flag.Int64("project", 0, "replay one project's searches (default: every project, each on its own labels)")
 	flag.Parse()
 	if *dbPath == "" {

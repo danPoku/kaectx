@@ -32,7 +32,7 @@ type Freshness struct {
 	// LastIngestAt is the most recent time any source file was read, in
 	// ISO-8601 UTC. Empty if nothing has ever been ingested.
 	LastIngestAt string
-	// PendingFiles counts log files that have content ctx hasn't read yet:
+	// PendingFiles counts log files that have content kae hasn't read yet:
 	// files it has never seen, or files that grew or shrank since it last
 	// read them. Files written to within the quiet window are not counted
 	// (see CheckFreshness).
@@ -51,7 +51,7 @@ type Freshness struct {
 const FreshnessQuiet = 2 * time.Minute
 
 // CheckFreshness compares each log file under roots with what the sources
-// table says ctx has read from it. It only stats files and reads one query;
+// table says kae has read from it. It only stats files and reads one query;
 // it never opens a log file, so it is cheap enough to run on every search
 // (about a thousand stat calls on a machine with months of sessions).
 func CheckFreshness(db *sql.DB, roots []Root, now time.Time) (Freshness, error) {
@@ -130,9 +130,9 @@ func CheckFreshness(db *sql.DB, roots []Root, now time.Time) (Freshness, error) 
 }
 
 // CatchUp runs RunAll over every root while holding the ingest lock (see
-// Lock). Several `ctx mcp` servers are often running at once, one per open
+// Lock). Several `kae mcp` servers are often running at once, one per open
 // agent session, and each catches up at startup; the lock makes all but one
-// of them, and any of them while `ctx daemon` runs, back off with
+// of them, and any of them while `kae daemon` runs, back off with
 // ErrIngestBusy instead of reading the same logs at the same moment.
 //
 // Per-file failures don't stop the run; they are in the returned results

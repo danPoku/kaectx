@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Command evalset is a read-only development tool for issue #43. It runs a
-// fixed set of real queries with known right answers against a copy of a ctx
+// fixed set of real queries with known right answers against a copy of a kae
 // database and reports recall@10 and mean reciprocal rank, for normal and for
 // risk-aware search, so a change to ranking or governance can be shown to
 // help or hurt before it ships.
 //
-//	go run -tags sqlite_fts5 ./scripts/evalset -db /path/to/copy-of-ctx.db -cases cases.json
+//	go run -tags sqlite_fts5 ./scripts/evalset -db /path/to/copy-of-kae.db -cases cases.json
 //
 // The case file holds real queries and session IDs from the machine it was
 // built on, so it is private to that machine: keep it out of the repository.
@@ -40,7 +40,7 @@ import (
 )
 
 func main() {
-	dbPath := flag.String("db", "", "path to a copy of ctx.db (opened read-only)")
+	dbPath := flag.String("db", "", "path to a copy of kae.db (opened read-only)")
 	casesPath := flag.String("cases", "", "path to the case file (JSON)")
 	ollama := flag.String("ollama", embed.DefaultBaseURL, "Ollama base URL for the query embedding")
 	keywordOnly := flag.Bool("keyword-only", false, "skip the semantic half; do not compare with a hybrid run")
