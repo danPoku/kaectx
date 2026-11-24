@@ -10,7 +10,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/danPoku/kaectx/test.yml?branch=master&label=CI)](https://github.com/danPoku/kaectx/actions/workflows/test.yml)
 [![Go](https://img.shields.io/github/go-mod/go-version/danPoku/kaectx?logo=go&logoColor=white)](go.mod)
 [![MCP](https://img.shields.io/badge/MCP-12%20tools-6f42c1)](#tools)
-[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20WSL2%20%7C%20Windows-0969da)](#install)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20WSL2%20%7C%20macOS%20%7C%20Windows-0969da)](#install)
 [![License](https://img.shields.io/github/license/danPoku/kaectx?color=yellow)](LICENSE)
 
 [Quick start](#quick-start) · [How it works](#how-it-works) · [Remote development](#remote-and-cloud-development) · [MCP tools](#tools) · [Commands](#commands) · [Privacy](#privacy) · [Limitations](#limitations) · [Contributing](CONTRIBUTING.md)
@@ -51,7 +51,7 @@ $ kae search "how does the daemon embed new chunks in the background"
 Early. The current tagged release is v0.2.0, which adds file-aware memory,
 retrieval outcome tracking, opt-in risk-aware search, checkpoint and feedback
 signals, `kae doctor` and `kae audit-secrets`. Linux (including Ubuntu under WSL2) is the
-primary environment; native Windows is also supported and tested. Expect
+primary environment; native Windows and macOS are also supported and tested. Expect
 breaking changes in the 0.x series, including to the database schema and the
 MCP tool output. See
 [Limitations](#limitations) before relying on it.
@@ -186,16 +186,16 @@ installation and its `/home/<user>/.kae/kae.db`.
 
 ### macOS
 
-macOS is expected to work on Apple Silicon and Intel, but it has not been built
-or tested there yet. Nothing in the code is Linux-specific: session logs are
-found under `~/.claude/projects` and `~/.codex/sessions` via the user's home
-directory, and the database is `~/.kae/kae.db`. The likely snag is cgo, which
-needs Apple's command-line compiler tools:
+macOS is supported: every pull request is built and tested on Apple Silicon
+(`macos-latest`). cgo needs Apple's command-line compiler tools:
 
 ```
 xcode-select --install
 go install -tags sqlite_fts5 github.com/danPoku/kaectx/cmd/kae@latest
 ```
+
+Session logs are read from `~/.claude/projects` and `~/.codex/sessions`, and the
+database is `~/.kae/kae.db`, as on Linux.
 
 For semantic search:
 
@@ -205,7 +205,9 @@ ollama pull nomic-embed-text
 kae embed
 ```
 
-If you try it, please open an issue with the result, good or bad.
+Intel Macs are not part of CI. Nothing in the code is specific to either
+architecture, but if you run kae on one, an issue with the result, good or
+bad, is welcome.
 
 ## Quick start
 
@@ -570,8 +572,10 @@ way.
   session's old rows stay in the database.
 - There are no session summaries. The `summary` column exists and is unused.
 - Redaction is best effort, as described above.
-- macOS is untested (see [macOS](#macos)), and there are no prebuilt binaries
-  yet, so installing needs Go and a C compiler.
+- On macOS the test suite runs in CI on Apple Silicon, but kae has not yet been
+  checked there against real Claude Code and Codex logs, and Intel Macs are
+  not in CI (see [macOS](#macos)).
+- There are no prebuilt binaries yet, so installing needs Go and a C compiler.
 
 ## Development
 
@@ -593,7 +597,7 @@ the installer to run the same test/vet gate and replace the local executable:
 .\scripts\install-windows.ps1 -RunTests -StopRunning
 ```
 
-Linux and Windows run as separate CI jobs. `TestOllamaClientLive` is excluded
+Linux, macOS and Windows run as separate CI jobs. `TestOllamaClientLive` is excluded
 from the deterministic default suite; set `KAE_LIVE_OLLAMA=1` to run it against
 a real Ollama with `nomic-embed-text` pulled.
 
