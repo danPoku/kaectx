@@ -667,6 +667,7 @@ first_seq and last_seq rather than paging from the start.
 | `kae forget <session-id> [--yes]` | Delete a session and everything stored from it, and never ingest it again. Asks first. |
 | `kae ui [--port N] [--allow-edits]` | Browse projects, sessions, notes and search in a local web page on `127.0.0.1`, behind a per-run token. Read-only unless `--allow-edits`. |
 | `kae audit-secrets` | Re-scan stored text with the current redaction rules and report rows and rule names (never the matched text). Exits non-zero on findings. Changes nothing. |
+| `kae report [--since D] [--all-projects] [--json]` | What kae did over a period (default the last 7 days), as counts, each with its change from the period before: searches, results opened and labelled, search verdicts, handoffs, sessions ingested and secrets redacted. |
 | `kae doctor` | Report the current project's sessions, embedding backlog, retrievals, outcomes, search outcomes, checkpoint checks (by level and by what the user did next) and handoff pickup (handoffs saved at a checkpoint or with `kae handoff`, and how many were read within 7 days through a note search, the brief, `kae resume` or `get_handoff`), plus database-wide source, ingest-error and unassigned-chunk counts, and the log line types the adapters skipped without recognising (agent, version, type, count, first and last seen). |
 | `kae mcp` | Serve MCP over stdio. Catches up on unread session logs in the background. |
 | `kae daemon` | Ingest and embed continuously. |
@@ -678,6 +679,39 @@ been deleted or moved can no longer have its git remote looked up, so it lands
 in a project of its own. Merging moves the sessions, paths, notes and file
 touches, refuses to merge two projects that both have a remote, and queues the
 moved chunks for re-embedding.
+
+## What kae did for you
+
+```
+$ kae report
+kae report: api, 2026-11-17 to 2026-11-24
+Change is against the period before it (2026-11-10 to 2026-11-17). Every figure is a count of what kae recorded.
+
+searches run             42  (+12)   mcp 40, cli 2; 3 returned nothing
+results opened           18  (+5)
+results labelled         11  (-2)    helpful 9, unhelpful 1, stale 1, incorrect 0, superseded 0
+search verdicts           9  (+9)    helpful 7, partial 1, unhelpful 1
+handoffs saved            2  (=)     1 picked up within 7 days
+sessions ingested        31  (+4)    claude-code 25, codex 6
+secrets redacted         57  (+20)
+```
+
+`kae report` shows what kae did over a period for the project you are standing
+in: the searches your agents ran, the results they opened and how they
+labelled them, their verdicts on whole searches, handoffs saved and picked up,
+sessions ingested and secrets redacted. Each figure is shown with its change
+from the period of the same length before it.
+
+`--since` takes a period (`7d`, the default, `36h`, `2w`), a date or a time.
+`--all-projects` covers the whole catalogue, and `--json` prints the same
+figures for scripts. A period with no activity prints zeros.
+
+Every figure is a count of rows kae recorded, and can be checked with a query
+against `~/.kae/kae.db`. There is deliberately no estimate of time or tokens
+saved: kae cannot measure that, and a made-up number would be worth less than
+none. Searches are split by where they ran (`mcp` or `cli`), not by agent,
+because kae does not record which agent made a search. `kae doctor` covers
+the same ground as a health check; this is the statement.
 
 ## Seeing and correcting what kae holds
 
@@ -874,6 +908,7 @@ internal/search/     keyword and hybrid queries
 internal/mcpserver/  the MCP tools
 internal/daemon/     filesystem watching
 internal/inspector/  the local web page behind kae ui
+internal/report/     the figures behind kae report
 internal/vecext/     vendored sqlite-vec and its cgo registration
 migrations/          SQL schema
 queries/             named SQL queries

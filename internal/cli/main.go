@@ -111,6 +111,11 @@ func Main() {
 			fmt.Fprintln(os.Stderr, "kae ui:", err)
 			os.Exit(1)
 		}
+	case "report":
+		if err := runReport(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "kae report:", err)
+			os.Exit(1)
+		}
 	case "setup":
 		if err := runSetup(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "kae setup:", err)
@@ -156,6 +161,7 @@ commands:
   forget <session-id> [--yes]         delete a session and everything stored from it; it is never ingested again
   ui [--port N] [--allow-edits]       browse what kae holds in a local web page (read-only unless --allow-edits)
   audit-secrets                       re-scan stored text with the redaction rules and report residual secrets
+  report [--since D] [--all-projects] [--json]   what kae did over a period, in counts, against the period before
   doctor                              report ingestion, embedding, retrieval, and outcome health
   mcp                                 serve kae's tools over MCP (stdio) for an agent to call
   daemon [--fallback-interval D]      watch session dirs continuously and ingest live (Ctrl+C to stop)
