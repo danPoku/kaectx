@@ -668,7 +668,7 @@ first_seq and last_seq rather than paging from the start.
 | `kae ui [--port N] [--allow-edits]` | Browse projects, sessions, notes and search in a local web page on `127.0.0.1`, behind a per-run token. Read-only unless `--allow-edits`. |
 | `kae audit-secrets` | Re-scan stored text with the current redaction rules and report rows and rule names (never the matched text). Exits non-zero on findings. Changes nothing. |
 | `kae report [--since D] [--all-projects] [--json]` | What kae did over a period (default the last 7 days), as counts, each with its change from the period before: searches, results opened and labelled, search verdicts, handoffs, sessions ingested and secrets redacted. |
-| `kae doctor` | Report the current project's sessions, embedding backlog, retrievals, outcomes, search outcomes, checkpoint checks (by level and by what the user did next) and handoff pickup (handoffs saved at a checkpoint or with `kae handoff`, and how many were read within 7 days through a note search, the brief, `kae resume` or `get_handoff`), plus database-wide source, ingest-error and unassigned-chunk counts, and the log line types the adapters skipped without recognising (agent, version, type, count, first and last seen). |
+| `kae doctor` | Lists the database backups taken before schema updates, and reports the current project's sessions, embedding backlog, retrievals, outcomes, search outcomes, checkpoint checks (by level and by what the user did next) and handoff pickup (handoffs saved at a checkpoint or with `kae handoff`, and how many were read within 7 days through a note search, the brief, `kae resume` or `get_handoff`), plus database-wide source, ingest-error and unassigned-chunk counts, and the log line types the adapters skipped without recognising (agent, version, type, count, first and last seen). |
 | `kae mcp` | Serve MCP over stdio. Catches up on unread session logs in the background. |
 | `kae daemon` | Ingest and embed continuously. |
 | `kae version` | Print the version of this binary. |
@@ -799,6 +799,20 @@ under a folder that is a project of its own.
 **Storage.** SQLite in WAL mode with strict tables. The schema is in
 `migrations/`. The vector table is optional: if the extension fails to load,
 everything else keeps working. The queries are in `queries/retrieval.sql`.
+
+**Backups before a schema update.** When a newer kae opens a database from an
+older one, it first copies the whole database to
+`~/.kae/backups/kae-s<schema version>-<UTC time>.db`, then updates the schema,
+and says so on stderr. The newest three backups are kept and `kae doctor`
+lists them. Nothing is copied when no update is pending, so this happens once
+per upgrade. If the copy cannot be written (a full disk, usually), kae stops
+without touching the schema; `KAE_NO_BACKUP=1` updates without a backup.
+
+To undo an upgrade: stop the daemon and close your agents, reinstall the older
+kae, and copy the backup over `~/.kae/kae.db` (remove `kae.db-wal` and
+`kae.db-shm` if they are there). Sessions ingested since the backup can be
+read again with `kae ingest`; notes and labels saved since then are lost. A
+backup is as large as the database, and as private.
 
 ## Privacy
 

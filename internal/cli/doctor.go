@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/danPoku/kaectx/internal/doctor"
@@ -40,7 +41,35 @@ func runDoctor(args []string) error {
 		return err
 	}
 	fmt.Print(formatDoctor(report))
+	// Backups are files beside the database, not rows in it, so they are
+	// listed here rather than collected by the doctor package.
+	if loc, err := dataLocation(); err == nil {
+		backups, err := store.ListBackups(backupsDir(loc))
+		if err != nil {
+			return err
+		}
+		fmt.Print(formatBackups(backups))
+	}
 	return nil
+}
+
+// formatBackups lists the copies of the database taken before schema
+// updates, newest first, e.g.
+//
+//	kae-s19-20261124T093000Z.db  schema 19  2026-11-24 09:30  412.0 MB
+func formatBackups(backups []store.Backup) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nbackups (taken before a schema update; the newest %d are kept)\n", store.BackupsKept)
+	if len(backups) == 0 {
+		b.WriteString("  none: no schema update has run since backups were introduced\n")
+		return b.String()
+	}
+	for _, bk := range backups {
+		fmt.Fprintf(&b, "  %s  schema %d  %s  %.1f MB\n", filepath.Base(bk.Path), bk.SchemaVersion,
+			bk.At.Format("2006-01-02 15:04"), float64(bk.Size)/(1<<20))
+	}
+	fmt.Fprintf(&b, "  in %s; to go back, stop kae and copy one over the database with the older binary\n", filepath.Dir(backups[0].Path))
+	return b.String()
 }
 
 func formatDoctor(r doctor.Report) string {
