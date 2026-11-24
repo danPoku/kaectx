@@ -22,7 +22,7 @@ import (
 // asserted in Go.
 const Dims = 768
 
-// DefaultBaseURL and DefaultModel are what every ctx subcommand uses unless
+// DefaultBaseURL and DefaultModel are what every kae subcommand uses unless
 // told otherwise — Ollama's standard local port, and the model
 // migrations/002_vectors.sql's FLOAT[768] column was sized for.
 const (

@@ -179,7 +179,7 @@ func (s *server) checkpointSession(sessionID string) (checkpointSession, error) 
 
 // recordCheckpointCheck stores this assessment, one row per session, latest
 // wins. Healthy checks are stored too: without them there is no record of the
-// sessions ctx said to carry on with, and so nothing to compare the
+// sessions kae said to carry on with, and so nothing to compare the
 // recommendations against.
 //
 // What happens to an earlier outcome depends on what it answered:

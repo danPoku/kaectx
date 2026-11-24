@@ -52,7 +52,7 @@ type Result struct {
 	OriginalRank        int
 }
 
-// BestResult reports what ran, not just the hits — callers (ctx search,
+// BestResult reports what ran, not just the hits — callers (kae search,
 // the search_context MCP tool) can tell the user semantic search quietly
 // degraded instead of presenting a fallback as if it were the real thing.
 type BestResult struct {

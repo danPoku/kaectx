@@ -33,7 +33,7 @@ func EvidenceKey(sessionID string, firstSeq, lastSeq int) string {
 //
 // A label none of these recovers keeps a NULL anchor and goes on matching its
 // exact key, as it always did. The whole migration, columns included, runs
-// under BEGIN IMMEDIATE so a concurrent ingest or a second ctx process cannot
+// under BEGIN IMMEDIATE so a concurrent ingest or a second kae process cannot
 // interleave with the backfill.
 func migrateEvidenceAnchors(db *sql.DB) error {
 	ctx := context.Background()

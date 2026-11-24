@@ -114,7 +114,7 @@ func (s *server) registerSearch(srv *mcp.Server) {
 		Description: "Keyword search over past coding-agent sessions in this project — across every agent that's been ingested (Claude Code, Codex, ...), not just the one calling this tool. " +
 			"Returns short snippets, not full transcripts. To read a hit, make the call in its next_step: get_chunk with its chunk_id, the result's run_id and the hit's rank (the matching exchange, ~1k tokens). Or call get_session with its session_id, from_seq/to_seq set to the hit's first_seq/last_seq, and the same run_id and rank. " +
 			"For questions about a period (\"what happened last week\"), set since/until: otherwise older, stronger matches outrank the period you asked about. " +
-			"If the result's index.warning is set, ctx has not read some recent logs yet; say so rather than concluding nothing happened. " +
+			"If the result's index.warning is set, kae has not read some recent logs yet; say so rather than concluding nothing happened. " +
 			"When the work spans more than one repo (an API and its frontend, say) and this project's sessions do not hold the answer, set scope to all: every project is searched and each hit names its project. A hit from another project can be read only through its next_step, which carries the run_id and rank that authorise it. " +
 			"Once you know whether the search answered your question, make the call in outcome_next_step. A search answered by its snippets alone, with nothing opened, is helpful; one that returned nothing useful is unhelpful, with the reason.",
 	}, s.searchContext)

@@ -12,13 +12,13 @@ import (
 )
 
 // ErrIngestBusy means another process holds the ingest lock.
-var ErrIngestBusy = errors.New("another ctx process is already ingesting (ctx daemon, ctx ingest, or an MCP server catching up)")
+var ErrIngestBusy = errors.New("another kae process is already ingesting (kae daemon, kae ingest, or an MCP server catching up)")
 
 // Lock takes the machine-wide ingest lock at lockPath without waiting, and
 // returns a function that releases it.
 //
-// Every ingest entry point takes it: `ctx daemon` for its whole life,
-// `ctx ingest` for one run, and each MCP server's catch-up. Ingest is
+// Every ingest entry point takes it: `kae daemon` for its whole life,
+// `kae ingest` for one run, and each MCP server's catch-up. Ingest is
 // idempotent for ONE reader, but two processes reading the same log at the
 // same moment both start from the same byte offset and number the same
 // lines from a MAX(seq) that is moving under them, which stores those lines

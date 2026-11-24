@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package cli
 
 import (
 	"flag"
@@ -56,7 +56,7 @@ func runIngest(args []string) error {
 
 	// One ingester at a time; see ingest.Lock. If the daemon holds the lock
 	// it is already keeping the index current, so there is nothing to do.
-	release, err := ingest.Lock(ingestLockPath(home))
+	release, err := ingest.Lock(ingestLockPath())
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func runIngest(args []string) error {
 		for _, r := range results {
 			if r.Err != nil {
 				failed++
-				fmt.Fprintf(os.Stderr, "ctx ingest: %s: %v\n", r.Path, r.Err)
+				fmt.Fprintf(os.Stderr, "kae ingest: %s: %v\n", r.Path, r.Err)
 				continue
 			}
 			ok++
@@ -103,11 +103,18 @@ func ingestRoots(home string) []ingest.Root {
 	return roots
 }
 
-// ingestLockPath is the lock ingest.CatchUp uses to keep concurrent ctx
+// ingestLockPath is the lock ingest.CatchUp uses to keep concurrent kae
 // processes from catching up at the same time. It sits beside the database
 // because that is the thing it protects.
-func ingestLockPath(home string) string {
-	return filepath.Join(home, ".ctx", "ingest.lock")
+//
+// Call it after openStore: the data folder is resolved once per process and
+// openStore is what creates it.
+func ingestLockPath() string {
+	loc, err := dataLocation()
+	if err != nil {
+		return ""
+	}
+	return loc.Lock
 }
 
 func findAgentSource(name string) (agentSource, error) {

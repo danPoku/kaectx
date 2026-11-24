@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package cli
 
 import (
 	"context"
@@ -50,19 +50,19 @@ func runDaemon(args []string) error {
 
 	// The daemon owns ingest for as long as it runs: holding the ingest lock
 	// makes MCP servers skip their own catch-ups (the daemon is already
-	// current) and stops `ctx ingest` from racing it. If an MCP server is
+	// current) and stops `kae ingest` from racing it. If an MCP server is
 	// midway through a catch-up, wait for it rather than give up.
-	release, err := ingest.Lock(ingestLockPath(home))
+	release, err := ingest.Lock(ingestLockPath())
 	if errors.Is(err, ingest.ErrIngestBusy) {
-		fmt.Println("ctx daemon: another ctx process is ingesting; waiting for it to finish")
-		release, err = ingest.LockWait(ctx, ingestLockPath(home), 2*time.Second)
+		fmt.Println("kae daemon: another kae process is ingesting; waiting for it to finish")
+		release, err = ingest.LockWait(ctx, ingestLockPath(), 2*time.Second)
 	}
 	if err != nil {
 		return err
 	}
 	defer release()
 
-	fmt.Printf("ctx daemon: watching %d source(s), press Ctrl+C to stop\n", len(sources))
+	fmt.Printf("kae daemon: watching %d source(s), press Ctrl+C to stop\n", len(sources))
 	for _, src := range sources {
 		fmt.Printf("  %s: %s\n", src.Agent, src.Root)
 	}

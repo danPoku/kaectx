@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package cli
 
 import (
 	"database/sql"
@@ -33,7 +33,7 @@ func TestFormatDoctor(t *testing.T) {
 		},
 		HandoffsSaved: 2, HandoffsLinked: 2, HandoffsPickedUp: 1,
 	})
-	for _, want := range []string{"ctx doctor: ctx", "2 (1 with errors)", "4 / 20 / 8", "pending: 3", "10 (2 zero-result, 6 hybrid, 1 risk-aware)", "5 (3 exact, 2 inferred; 3 labelled, 2 awaiting outcome)", "2 / 4 evidence keys (50.0%)", "1 / 1",
+	for _, want := range []string{"kae doctor: ctx", "2 (1 with errors)", "4 / 20 / 8", "pending: 3", "10 (2 zero-result, 6 hybrid, 1 risk-aware)", "5 (3 exact, 2 inferred; 3 labelled, 2 awaiting outcome)", "2 / 4 evidence keys (50.0%)", "1 / 1",
 		"helpful 3, partial 2, unhelpful 0", "reasons: wrong_project 2, not_indexed 0, stale_state 0, ranking 0",
 		"checks: 9 (healthy 4, checkpoint_recommended 3, checkpoint_strongly_recommended 2)",
 		"healthy: continued 1, no outcome 3",

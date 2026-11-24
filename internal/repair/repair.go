@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package repair re-derives data that depends on git, for databases written
-// before ctx computed it correctly. It works from what is already in the
+// before kae computed it correctly. It works from what is already in the
 // database (session cwd, branch, message timestamps, stored paths), so it
 // needs no access to the original log files.
 package repair
@@ -220,7 +220,7 @@ type TouchesResult struct {
 }
 
 // Touches backfills file_touches for Codex apply_patch calls ingested before
-// ctx knew how to read them. The patch text is already in messages.content,
+// kae knew how to read them. The patch text is already in messages.content,
 // so no log file is needed. A call that already has touches is skipped, which
 // is what makes it safe to repeat. Like Git it runs in one transaction.
 func Touches(db *sql.DB, git *store.GitResolver, dryRun bool) (TouchesResult, error) {

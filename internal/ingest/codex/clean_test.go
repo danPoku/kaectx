@@ -9,8 +9,8 @@ func TestCleanUserText(t *testing.T) {
 	cases := []struct{ name, in, want string }{
 		{
 			name: "real line: leading &#x20; and escaped underscore",
-			in:   "&#x20;Use the ctx search\\_context tool to find ZEPHYRQUOKKA-VSC-1 and tell me which agent's session it came from.\n",
-			want: "Use the ctx search_context tool to find ZEPHYRQUOKKA-VSC-1 and tell me which agent's session it came from.",
+			in:   "&#x20;Use the kae search\\_context tool to find ZEPHYRQUOKKA-VSC-1 and tell me which agent's session it came from.\n",
+			want: "Use the kae search_context tool to find ZEPHYRQUOKKA-VSC-1 and tell me which agent's session it came from.",
 		},
 		{
 			name: "real Windows paths keep every backslash",

@@ -1,8 +1,8 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-// Package store manages the ctx SQLite database: opening it with the
-// connection pragmas every ctx component depends on, and applying the
+// Package store manages the kae SQLite database: opening it with the
+// connection pragmas every kae component depends on, and applying the
 // embedded schema migrations.
 package store
 
@@ -29,7 +29,7 @@ func init() {
 }
 
 // Open opens (creating if necessary) the SQLite database at path with the
-// four connection pragmas required by every ctx component: journal_mode=WAL,
+// four connection pragmas required by every kae component: journal_mode=WAL,
 // foreign_keys=ON, busy_timeout=5000, synchronous=NORMAL.
 //
 // The pragmas ride on the DSN rather than a post-Open Exec. database/sql
@@ -52,7 +52,7 @@ func Open(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-// MigrateResult reports what Migrate actually applied, so callers (ctx init,
+// MigrateResult reports what Migrate actually applied, so callers (kae init,
 // tests) can tell whether semantic search is available without parsing error
 // strings.
 type MigrateResult struct {
@@ -140,7 +140,7 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 }
 
 // applySQLMigration executes a self-recording SQL migration once. The version
-// check happens again inside the write transaction so two ctx processes that
+// check happens again inside the write transaction so two kae processes that
 // start together cannot both perform the migration work.
 func applySQLMigration(db *sql.DB, version int, file string) error {
 	conn, err := db.Conn(context.Background())
@@ -189,7 +189,7 @@ func migrateSessionGit(db *sql.DB) error {
 // migrateTouchRooted is migration 004: file_touches.rooted says whether a
 // row's path was computed relative to the git repository root (1) or by the
 // older rule, relative to the session's working directory (0). Rows from
-// before it default to 0, which is what `ctx repair git` looks for.
+// before it default to 0, which is what `kae repair git` looks for.
 func migrateTouchRooted(db *sql.DB) error {
 	return addColumns(db, 4, "touch_rooted", "file_touches",
 		column{"rooted", "INTEGER NOT NULL DEFAULT 0"})
@@ -199,7 +199,7 @@ func migrateTouchRooted(db *sql.DB) error {
 // starting/ending_commit were obtained (see the Source* constants), so a
 // commit that is only a best guess can be shown as one. NULL means either no
 // commit, or one stored before this column existed and not yet re-derived by
-// `ctx repair git`.
+// `kae repair git`.
 func migrateCommitSource(db *sql.DB) error {
 	return addColumns(db, 5, "commit_source", "sessions", column{"commit_source", "TEXT"})
 }
@@ -257,7 +257,7 @@ func migrateCandidateProject(db *sql.DB) error {
 // since 001, never written until now) it says where a note came from, the
 // way a memory_observation's anchor says which exchange it judged. Both stay
 // NULL for a note whose save_note call has not been found in any ingested
-// log; `ctx repair notes` fills them for notes saved before this existed.
+// log; `kae repair notes` fills them for notes saved before this existed.
 func migrateNoteAnchor(db *sql.DB) error {
 	return addColumns(db, 18, "note_anchor", "notes", column{"anchor_seq", "INTEGER"})
 }

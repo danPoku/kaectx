@@ -22,7 +22,7 @@ jobs:
           cache: true
       - run: go test -count=1 -tags sqlite_fts5 ./...
       - run: go vet -tags sqlite_fts5 ./...
-      - run: go build -tags sqlite_fts5 ./cmd/ctx
+      - run: go build -tags sqlite_fts5 ./cmd/kae ./cmd/ctx
 
   windows:
     runs-on: windows-latest
@@ -45,4 +45,4 @@ jobs:
           export CGO_ENABLED=1
           go test -count=1 -tags sqlite_fts5 ./...
           go vet -tags sqlite_fts5 ./...
-          go build -tags sqlite_fts5 ./cmd/ctx
+          go build -tags sqlite_fts5 ./cmd/kae ./cmd/ctx

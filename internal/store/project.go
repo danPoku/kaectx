@@ -110,7 +110,7 @@ func LookupProject(db DBTX, cwd string) (int64, bool, error) {
 // Catalogues built before this rule can hold one folder under two projects.
 // When keys tie, the lower project id wins. The choice must not depend on
 // which spelling cwd used, or the three spellings would still split;
-// `ctx repair projects` then re-files the loser's sessions.
+// `kae repair projects` then re-files the loser's sessions.
 func lookupByPathPrefix(db DBTX, cwd string) (int64, bool, error) {
 	rows, err := db.Query(`SELECT path, project_id FROM project_paths ORDER BY project_id`)
 	if err != nil {

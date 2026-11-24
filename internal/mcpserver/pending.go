@@ -20,10 +20,10 @@ type servedRun struct {
 	query string
 }
 
-// servedRuns remembers the searches this `ctx mcp` process served, oldest
+// servedRuns remembers the searches this `kae mcp` process served, oldest
 // first. It is deliberately in memory, not a query over retrieval_runs: each
 // agent session spawns its own server process, so "what this process served"
-// is the closest thing ctx has to "what this agent searched". Asking agent A
+// is the closest thing kae has to "what this agent searched". Asking agent A
 // for a verdict on agent B's search would get a guess, and a guessed verdict
 // is worse than none. Like a waiter who asks about the dishes they carried
 // to the table, not every dish the kitchen sent out that night.

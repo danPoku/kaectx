@@ -18,7 +18,7 @@ Closes #
 
 <!-- Delete the lines that don't apply. Any of these makes the next release a minor bump. -->
 
-- Schema: new migration `0NN_...`. Upgrade from the last release tested: yes / no. Needs `ctx repair ...` afterwards: yes / no.
+- Schema: new migration `0NN_...`. Upgrade from the last release tested: yes / no. Needs `kae repair ...` afterwards: yes / no.
 - MCP: tools or output fields added, renamed or removed:
 - CLI: commands or flags added, renamed or removed:
 - Adapter: new fixture in `testdata/` from agent version:

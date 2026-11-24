@@ -28,14 +28,14 @@ type MessagesResult struct {
 
 // Messages re-derives user and system messages from the raw line stored
 // with each one, using the current adapters, for databases ingested before
-// ctx told harness-injected text apart from what the person typed, and
+// kae told harness-injected text apart from what the person typed, and
 // before it read prompts spread over several content blocks.
 //
 // Like reprinting index cards after correcting the filing rules: the
 // original letters (messages.raw) never changed, only how they were read.
 // For each session where any message changes, the chunks are rebuilt from
 // scratch, so injected text stops starting its own chunk. New chunks have no
-// embedding yet; the embedding worker (`ctx daemon` or `ctx embed`) picks
+// embedding yet; the embedding worker (`kae daemon` or `kae embed`) picks
 // them up as it does any new chunk. Sessions that are untitled, or whose
 // title came from injected text, get a title from their first typed prompt.
 //

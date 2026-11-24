@@ -23,11 +23,11 @@ import (
 	"github.com/danPoku/kaectx/internal/redact"
 )
 
-// saveNoteTool matches the name Claude Code logs for ctx's save_note tool:
+// saveNoteTool matches the name Claude Code logs for kae's save_note tool:
 // mcp__<server>__save_note, where <server> is whatever name the user
-// registered ctx under (usually "ctx"). Another MCP server could expose a
+// registered kae under (usually "kae"; "ctx" before the rename). Another MCP server could expose a
 // tool with the same name; the ID-and-title check below is what stops its
-// calls claiming a ctx note.
+// calls claiming a kae note.
 //
 // Codex is not matched. Codex reaches MCP tools through a script it passes to
 // its "exec" tool, so a save_note call is JavaScript inside another tool's

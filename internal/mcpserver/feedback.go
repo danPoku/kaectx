@@ -77,7 +77,7 @@ type checkpointOutcomeArgs struct {
 	Outcome   string `json:"outcome" jsonschema:"one of started_new_session, saved_handoff, continued, dismissed"`
 	Note      string `json:"note,omitempty" jsonschema:"optional explanation; secrets are redacted before storage"`
 	// NoteID is 0 when absent: note IDs start at 1.
-	NoteID int64 `json:"note_id,omitempty" jsonschema:"for saved_handoff, the id save_note returned for the handoff note, so ctx can tell later whether a session read it"`
+	NoteID int64 `json:"note_id,omitempty" jsonschema:"for saved_handoff, the id save_note returned for the handoff note, so kae can tell later whether a session read it"`
 }
 
 type checkpointOutcomeResult struct {
@@ -105,11 +105,11 @@ func (s *server) registerFeedback(srv *mcp.Server) {
 	}, s.recordSearchOutcome)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "feedback_status",
-		Description: "Return a small inbox of high-confidence feedback opportunities derived from recorded CTX activity. Call at natural milestones. A nudge reports missing feedback, never infers that retrieved context was helpful or harmful. Ask only when the answer is already apparent or the interruption is worthwhile. pending_searches lists your own searches in this session that have no whole-search outcome yet; make each one's next_step call (a search answered by its snippets alone is helpful).",
+		Description: "Return a small inbox of high-confidence feedback opportunities derived from recorded kae activity. Call at natural milestones. A nudge reports missing feedback, never infers that retrieved context was helpful or harmful. Ask only when the answer is already apparent or the interruption is worthwhile. pending_searches lists your own searches in this session that have no whole-search outcome yet; make each one's next_step call (a search answered by its snippets alone is helpful).",
 	}, s.feedbackStatus)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "record_checkpoint_outcome",
-		Description: "Record the user's response to a checkpoint check. Use the exact session_id and one of started_new_session, saved_handoff, continued, or dismissed. After a healthy check, with no recommendation made, only continued applies. For saved_handoff, pass note_id with the id save_note returned for the handoff, so ctx can tell later whether a session picked it up.",
+		Description: "Record the user's response to a checkpoint check. Use the exact session_id and one of started_new_session, saved_handoff, continued, or dismissed. After a healthy check, with no recommendation made, only continued applies. For saved_handoff, pass note_id with the id save_note returned for the handoff, so kae can tell later whether a session picked it up.",
 	}, s.recordCheckpointOutcome)
 }
 

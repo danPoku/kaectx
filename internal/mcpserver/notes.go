@@ -97,7 +97,7 @@ func (s *server) saveNote(_ context.Context, req *mcp.CallToolRequest, args save
 	}
 
 	// session_id is left NULL: an MCP tool call isn't necessarily tied to
-	// a session ctx has already ingested (that session may still be live,
+	// a session kae has already ingested (that session may still be live,
 	// or belong to an agent whose adapter hasn't run yet), so there's no
 	// reliable id to attach here without guessing.
 	res, err := tx.Exec(sqlText,

@@ -35,7 +35,7 @@ type HybridResult struct {
 // MaxSemanticDistance is the farthest cosine distance (0 = identical, 2 =
 // opposite) at which a vector neighbour still counts as a semantic match.
 //
-// Calibrated on real ctx data with nomic-embed-text: exact and near-exact
+// Calibrated on real kae data with nomic-embed-text: exact and near-exact
 // matches sit at 0.14 to 0.30, genuinely on-topic paraphrases at 0.33 to
 // 0.47, and the BEST match for an off-topic query (a recipe, a revenue
 // forecast) at 0.56 to 0.60. 0.50 splits the last two groups. Recalibrate if

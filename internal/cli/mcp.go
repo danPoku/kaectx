@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package cli
 
 import (
 	"context"
@@ -14,13 +14,13 @@ import (
 	"github.com/danPoku/kaectx/internal/mcpserver"
 )
 
-// runMCP serves ctx's tools over stdio. It's meant to be launched by a
+// runMCP serves kae's tools over stdio. It's meant to be launched by a
 // coding agent (Claude Code, Codex, ...) as a local subprocess, from within
 // the project the agent is working on — mcpserver.New resolves that project
-// from this process's own working directory, same as `ctx search` does.
+// from this process's own working directory, same as `kae search` does.
 //
 // The server is also given the agents' log directories, so it can catch up
-// on unread logs itself when no `ctx daemon` is running; see
+// on unread logs itself when no `kae daemon` is running; see
 // mcpserver.Options.
 func runMCP(args []string) error {
 	db, _, err := openStore()
@@ -39,7 +39,7 @@ func runMCP(args []string) error {
 	}
 	client := embed.NewOllamaClient(embed.DefaultBaseURL, embed.DefaultModel)
 	srv, err := mcpserver.NewWithOptions(db, cwd, client, mcpserver.Options{
-		Roots: ingestRoots(home), LockPath: ingestLockPath(home),
+		Roots: ingestRoots(home), LockPath: ingestLockPath(),
 	})
 	if err != nil {
 		return err

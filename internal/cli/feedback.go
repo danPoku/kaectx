@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-package main
+package cli
 
 import (
 	"database/sql"
@@ -16,10 +16,10 @@ import (
 	"github.com/danPoku/kaectx/internal/store"
 )
 
-const feedbackUsage = "usage: ctx feedback <run_id> <rank> <outcome> [--note TEXT]\n  outcome: " +
+const feedbackUsage = "usage: kae feedback <run_id> <rank> <outcome> [--note TEXT]\n  outcome: " +
 	"helpful | unhelpful | stale | incorrect | superseded"
 
-// runFeedback labels one result of an earlier `ctx search`, the CLI's
+// runFeedback labels one result of an earlier `kae search`, the CLI's
 // counterpart to the record_retrieval_outcome MCP tool. Both write through
 // feedback.Record.
 func runFeedback(args []string) error {
@@ -63,7 +63,7 @@ func feedbackIn(db *sql.DB, projectID int64, args []string, w io.Writer) error {
 	fmt.Fprintf(w, "recorded %s for %s #%d\n", outcome, runID, rank)
 	if got.AssessErr != nil {
 		// Stored regardless; say so rather than fail and invite a retry.
-		fmt.Fprintf(os.Stderr, "ctx feedback: warning: outcome recorded, but re-assessing the evidence failed: %v\n", got.AssessErr)
+		fmt.Fprintf(os.Stderr, "kae feedback: warning: outcome recorded, but re-assessing the evidence failed: %v\n", got.AssessErr)
 		return nil
 	}
 	a := got.Assessment
@@ -78,5 +78,5 @@ func feedbackIn(db *sql.DB, projectID int64, args []string, w io.Writer) error {
 // labelHint heads a recorded search's output: its run ID and how to label a
 // hit with it.
 func labelHint(runID string) string {
-	return fmt.Sprintf("run %s  (label a hit: ctx feedback %s <rank> <outcome>)", runID, runID)
+	return fmt.Sprintf("run %s  (label a hit: kae feedback %s <rank> <outcome>)", runID, runID)
 }

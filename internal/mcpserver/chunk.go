@@ -66,7 +66,7 @@ func (s *server) registerChunk(srv *mcp.Server) {
 func (s *server) getChunk(_ context.Context, _ *mcp.CallToolRequest, args getChunkArgs) (*mcp.CallToolResult, getChunkResult, error) {
 	// Half an exact target is a caller mistake, not a request to guess. Falling
 	// through to inference would quietly swap the search the agent named for
-	// one ctx picked.
+	// one kae picked.
 	if (args.RunID != "") != (args.Rank > 0) {
 		return nil, getChunkResult{}, fmt.Errorf("pass run_id and rank together, or neither")
 	}
@@ -175,7 +175,7 @@ const inferAmbiguityGap = 5 * time.Minute
 // inferAmbiguityGap, since retrieval_runs does not record which agent or
 // session searched and so cannot tell the two apart.
 //
-// Only MCP searches count. `ctx search` prints no chunk IDs (cmd/ctx/search.go),
+// Only MCP searches count. `kae search` prints no chunk IDs (internal/cli/search.go),
 // so an agent that searched through the CLI has no chunk_id to pass to
 // get_chunk, and a CLI search is more likely a person's. If the CLI ever
 // prints chunk IDs, revisit this filter.

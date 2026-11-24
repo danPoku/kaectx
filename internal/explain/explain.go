@@ -106,7 +106,7 @@ func NormalizePath(p string) string {
 
 // ResolvePath turns a path the caller typed (relative to cwd, or absolute)
 // into the project-relative form file_touches uses. Running
-// `ctx explain foo.go` from internal/store means internal/store/foo.go, not a
+// `kae explain foo.go` from internal/store means internal/store/foo.go, not a
 // file called foo.go at the project root. A path that lands outside the
 // project root is returned normalised but otherwise untouched.
 func ResolvePath(cwd, p string) string {
@@ -146,7 +146,7 @@ func ResolvePath(cwd, p string) string {
 // path is rewritten, and a relative one is just normalised. Rebasing a
 // relative path onto the server's cwd would turn a correct
 // "internal/store/store.go" into a wrong one whenever the agent launched
-// `ctx mcp` from a subdirectory.
+// `kae mcp` from a subdirectory.
 func ProjectPath(cwd, p string) string {
 	if paths.IsAbs(strings.TrimSpace(p)) {
 		return ResolvePath(cwd, p)

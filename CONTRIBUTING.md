@@ -113,7 +113,7 @@ tag ships.
 
 - **Schema.** Never edit a migration that has shipped in a tag. Add a new one,
   and say in the PR how an existing database is upgraded and whether a
-  `ctx repair` command is needed afterwards. Test both a fresh `ctx init` and
+  `kae repair` command is needed afterwards. Test both a fresh `kae init` and
   an upgrade from the previous release's database.
 - **MCP tools.** Tool names, arguments and output fields are what connected
   agents depend on. Call out any rename or removal in the PR; it makes the next

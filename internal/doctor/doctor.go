@@ -1,7 +1,7 @@
 // Copyright 2026 Dan Gyinaye Poku
 // SPDX-License-Identifier: Apache-2.0
 
-// Package doctor reports the health and observability of a ctx project.
+// Package doctor reports the health and observability of a kae project.
 package doctor
 
 import (

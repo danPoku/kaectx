@@ -18,7 +18,7 @@ import (
 	"github.com/danPoku/kaectx/internal/store"
 )
 
-// fixture is a small ctx database: one project, one claude-code session with
+// fixture is a small kae database: one project, one claude-code session with
 // two exchanges (A at messages 0-1, B at 2-3), and whatever searches and
 // labels a test adds.
 type fixture struct {

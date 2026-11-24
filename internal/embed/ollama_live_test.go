@@ -19,8 +19,8 @@ import (
 // reachable at the default URL (CI, a machine without it installed) — the
 // mocked tests already cover the client's logic either way.
 func TestOllamaClientLive(t *testing.T) {
-	if os.Getenv("CTX_LIVE_OLLAMA") != "1" {
-		t.Skip("set CTX_LIVE_OLLAMA=1 to run the live Ollama integration test")
+	if os.Getenv("KAE_LIVE_OLLAMA") != "1" {
+		t.Skip("set KAE_LIVE_OLLAMA=1 to run the live Ollama integration test")
 	}
 	probe, err := http.Get(DefaultBaseURL + "/api/tags")
 	if err != nil || probe.StatusCode != http.StatusOK {

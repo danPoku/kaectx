@@ -1,5 +1,5 @@
 name: Bug
-description: ctx ingests, stores, searches or serves something wrongly, or crashes.
+description: kae ingests, stores, searches or serves something wrongly, or crashes.
 title: "[BUG] "
 labels: [bug]
 body:
@@ -17,7 +17,7 @@ body:
     attributes:
       label: Evidence
       description: >-
-        What proves this is real: the command you ran and its output, a `ctx doctor`
+        What proves this is real: the command you ran and its output, a `kae doctor`
         excerpt, or a code reference such as internal/ingest/codex/adapter.go:42.
         Redact secrets and private paths before pasting session log lines.
       render: text
@@ -27,8 +27,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: ctx version
-      description: Output of `go version -m "$(command -v ctx)"`, the mod line is enough. Or the commit if built from a clone.
+      label: kae version
+      description: Output of `go version -m "$(command -v kae)"`, the mod line is enough. Or the commit if built from a clone.
       placeholder: github.com/danPoku/kaectx v0.2.0
     validations:
       required: true

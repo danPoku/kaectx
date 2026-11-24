@@ -326,7 +326,7 @@ func (s *server) absentError(queryName, param, what string, id any) error {
 	case !owner.Valid:
 		return fmt.Errorf("%s %v is not filed under any project, so no project's tools can read it", what, id)
 	default:
-		return fmt.Errorf("%s %v belongs to another project, %s (id %d); ctx tools read only the project this server was started in, unless you pass the run_id and rank of a search_context hit from a scope=all search that returned it",
+		return fmt.Errorf("%s %v belongs to another project, %s (id %d); kae tools read only the project this server was started in, unless you pass the run_id and rank of a search_context hit from a scope=all search that returned it",
 			what, id, name.String, owner.Int64)
 	}
 }
