@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -127,15 +128,58 @@ func (s *server) indexStatus() *indexStatus {
 		return nil
 	}
 	st := &indexStatus{LastIngestAt: f.LastIngestAt, PendingFiles: f.PendingFiles, OldestPendingAt: f.OldestPendingAt}
-	if f.PendingFiles == 0 {
-		return st
+	if f.PendingFiles > 0 {
+		st.CatchingUp = s.startCatchUp()
+		st.Warning = fmt.Sprintf("kae has %d session log file(s) it hasn't read yet (oldest from %s), so these results may be missing recent work.",
+			f.PendingFiles, f.OldestPendingAt)
+		if st.CatchingUp {
+			st.Warning += " A background catch-up is running; retry in a minute."
+		}
+		st.Warning += " Run `kae daemon` to keep the index current."
 	}
-	st.CatchingUp = s.startCatchUp()
-	st.Warning = fmt.Sprintf("kae has %d session log file(s) it hasn't read yet (oldest from %s), so these results may be missing recent work.",
-		f.PendingFiles, f.OldestPendingAt)
-	if st.CatchingUp {
-		st.Warning += " A background catch-up is running; retry in a minute."
+	// A second, different reason results can be incomplete: the logs were
+	// read, but some of their lines were of a type kae does not understand.
+	if w := s.unknownLinesWarning(time.Now()); w != "" {
+		if st.Warning != "" {
+			st.Warning += " "
+		}
+		st.Warning += w
 	}
-	st.Warning += " Run `kae daemon` to keep the index current."
 	return st
+}
+
+// unknownLinesWindow is how far back an unrecognised line type still earns a
+// warning. A type that has not appeared for two weeks was either a passing
+// experiment in the agent or has been dealt with by an adapter update;
+// warning about it on every search for ever would teach agents to ignore
+// the field. `kae doctor` still lists it.
+const unknownLinesWindow = 14 * 24 * time.Hour
+
+// unknownLinesWarning names the log line types this project's recent
+// sessions contained that the adapters skipped without recognising, or ""
+// when there are none. It fails open like the rest of the index status.
+func (s *server) unknownLinesWarning(now time.Time) string {
+	since := now.Add(-unknownLinesWindow).UTC().Format(time.RFC3339)
+	lines, err := ingest.ListUnknown(s.db, s.projectID, since, 3)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "kae mcp: unknown line types: %v\n", err)
+		return ""
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	parts := make([]string, len(lines))
+	for i, u := range lines {
+		agent := u.Agent
+		if u.Version != "" {
+			agent += " " + u.Version
+		}
+		since := u.FirstSeen
+		if len(since) >= 10 {
+			since = since[:10]
+		}
+		parts[i] = fmt.Sprintf("%s: %s, %d line(s) since %s", agent, u.LineType, u.Lines, since)
+	}
+	return "kae skipped log lines of a type it does not recognise (" + strings.Join(parts, "; ") +
+		"). An agent update may have changed its log format, so recent sessions in this project may be incomplete; `kae doctor` lists the types."
 }

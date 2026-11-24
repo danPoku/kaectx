@@ -1,0 +1,8 @@
+{"type":"mode","mode":"normal","sessionId":"sess-u"}
+{"type":"user","message":{"role":"user","content":"Summarise the attached quarterly report."},"sessionId":"sess-u","cwd":"/home/dev/proj","gitBranch":"main","version":"9.9.0","timestamp":"2026-11-20T10:00:00Z"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"Revenue grew and churn fell; details below."}]},"sessionId":"sess-u","cwd":"/home/dev/proj","version":"9.9.0","timestamp":"2026-11-20T10:00:05Z"}
+{"type":"conversation-digest","digest":"report summary","sessionId":"sess-u","version":"9.9.0","timestamp":"2026-11-20T10:00:06Z"}
+{"type":"file-history-snapshot","sessionId":"sess-u","snapshot":{}}
+{"type":"conversation-digest","digest":"report summary, continued","sessionId":"sess-u","version":"9.9.0","timestamp":"2026-11-20T10:05:00Z"}
+{"type":"user","message":{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":""}},{"type":"text","text":"What does page 2 say?"}]},"sessionId":"sess-u","cwd":"/home/dev/proj","version":"9.9.0","timestamp":"2026-11-20T10:06:00Z"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"Page 2 lists the regional figures."}]},"sessionId":"sess-u","cwd":"/home/dev/proj","version":"9.9.0","timestamp":"2026-11-20T10:06:05Z"}

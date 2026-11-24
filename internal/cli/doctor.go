@@ -11,6 +11,7 @@ import (
 
 	"github.com/danPoku/kaectx/internal/doctor"
 	"github.com/danPoku/kaectx/internal/feedback"
+	"github.com/danPoku/kaectx/internal/ingest"
 	"github.com/danPoku/kaectx/internal/store"
 )
 
@@ -72,6 +73,8 @@ search outcomes (last 7 days)
   reasons: %s
 
 checkpoints (sessions checked, all time)
+%s
+unknown log line types (all projects)
 %s`, r.ProjectName, r.Sources, r.SourcesWithErrors, lastIngest,
 		r.Sessions, r.Messages, r.Chunks, r.PendingEmbeddings, r.UnassignedChunks,
 		r.RecentRetrievals, r.RecentZeroResultRuns, r.RecentHybridRuns, r.RecentPolicyRuns,
@@ -81,7 +84,50 @@ checkpoints (sessions checked, all time)
 		r.CredibleEvidence, r.NeutralObservedEvidence(),
 		formatCounts(feedback.SearchOutcomes, r.SearchOutcomes),
 		formatCounts(feedback.SearchReasons, r.SearchReasons),
-		formatCheckpoints(r))
+		formatCheckpoints(r), formatUnknownLines(r.UnknownLineTypes))
+}
+
+// formatUnknownLines lists the line types the adapters skipped without
+// recognising them, e.g.
+//
+//	codex 0.160.0  response_item/function_call  412 lines in 9 files, 2026-11-20 to 2026-11-23
+//
+// An empty list is said outright, so "none" is a finding and not a blank.
+func formatUnknownLines(lines []ingest.UnknownLines) string {
+	if len(lines) == 0 {
+		return "  none: every line type read so far is one the adapters know\n"
+	}
+	var b strings.Builder
+	for _, u := range lines {
+		version := u.Version
+		if version == "" {
+			version = "(version not logged)"
+		}
+		when := dateOf(u.FirstSeen)
+		if dateOf(u.LastSeen) != when {
+			when += " to " + dateOf(u.LastSeen)
+		}
+		fmt.Fprintf(&b, "  %s %s  %s  %s in %s, %s\n", u.Agent, version, u.LineType,
+			countNoun(u.Lines, "line", "lines"), countNoun(u.Files, "file", "files"), when)
+	}
+	b.WriteString("  These lines were skipped. A new type usually means an agent update changed its log format;\n")
+	b.WriteString("  please report it at https://github.com/danPoku/kaectx/issues with the type and agent version.\n")
+	return b.String()
+}
+
+// dateOf shortens an ISO-8601 timestamp to its date.
+func dateOf(ts string) string {
+	if len(ts) >= 10 {
+		return ts[:10]
+	}
+	return ts
+}
+
+func countNoun(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 // formatCheckpoints prints how many sessions stand at each level and what the

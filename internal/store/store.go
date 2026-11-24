@@ -136,6 +136,9 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := migrateNoteAnchor(db); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := applySQLMigration(db, 19, "019_unknown_line_types.sql"); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
 }
 
