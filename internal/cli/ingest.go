@@ -4,14 +4,18 @@
 package cli
 
 import (
+	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/danPoku/kaectx/internal/firstrun"
 	"github.com/danPoku/kaectx/internal/ingest"
 	"github.com/danPoku/kaectx/internal/ingest/claudecode"
 	"github.com/danPoku/kaectx/internal/ingest/codex"
+	"github.com/danPoku/kaectx/internal/store"
 )
 
 // agentSource pairs an agent with where its session logs live and how to
@@ -40,6 +44,7 @@ func runIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	path := fs.String("path", "", "ingest a single JSONL file instead of scanning the default session directories")
 	agent := fs.String("agent", "claude-code", "which adapter to use with --path (claude-code or codex)")
+	quiet := fs.Bool("quiet", false, "do not print the summary shown after the first ingest into an empty database")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -74,6 +79,13 @@ func runIngest(args []string) error {
 		return nil
 	}
 
+	// Whether this ingest is the one that fills the database decides what is
+	// printed afterwards, so it has to be asked before any row is written.
+	before, err := firstrun.CountSessions(db)
+	if err != nil {
+		return err
+	}
+
 	ok, failed := 0, 0
 	for _, src := range agentSources {
 		results, err := ingest.RunAll(db, src.newAdapter, src.root(home))
@@ -90,7 +102,44 @@ func runIngest(args []string) error {
 		}
 	}
 	fmt.Printf("ingested %d file(s), %d failed\n", ok, failed)
+	if before == 0 && !*quiet {
+		summary, err := firstRunSummary(db)
+		if err != nil {
+			// The ingest itself succeeded; a summary that cannot be built
+			// is worth a warning, not a failed command.
+			fmt.Fprintf(os.Stderr, "kae ingest: warning: could not summarise the first ingest: %v\n", err)
+		} else if summary != "" {
+			fmt.Print("\n" + summary)
+		}
+	}
 	return nil
+}
+
+// firstRunSummary describes a database that has just been filled for the
+// first time: what was found, and a search to try from the project the user
+// is standing in. It returns "" when the ingest found no sessions, since
+// there is then nothing to show.
+func firstRunSummary(db *sql.DB) (string, error) {
+	overview, err := firstrun.Load(db)
+	if err != nil || overview.Sessions == 0 {
+		return "", err
+	}
+	// LookupProject, not ResolveProject: looking must not create a project
+	// row for whatever folder the user happens to run the first ingest in.
+	var projectID int64
+	if cwd, err := os.Getwd(); err == nil {
+		if id, found, err := store.LookupProject(db, cwd); err == nil && found {
+			projectID = id
+		}
+	}
+	suggestion, found, err := firstrun.Suggest(context.Background(), db, projectID)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return firstrun.Format(overview, nil), nil
+	}
+	return firstrun.Format(overview, &suggestion), nil
 }
 
 // ingestRoots is agentSources resolved against home, in the shape the
