@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"database/sql"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,15 +117,41 @@ func TestBriefHookNeverFails(t *testing.T) {
 		{"--hook", "--budget", "not-a-number"},
 		{"--hook", "--no-such-flag"},
 	} {
-		out := captureStdout(t, func() error { return runBrief(args) })
+		var out string
+		errOut := captureStderr(t, func() {
+			out = captureStdout(t, func() error { return runBrief(args) })
+		})
 		if out != "" {
 			t.Errorf("%v: a project with no history should print nothing, got %q", args, out)
+		}
+		if errOut != "" {
+			t.Errorf("%v: a hook must not write to stderr either, got %q", args, errOut)
 		}
 	}
 	// Without --hook a bad flag is an ordinary error.
 	if err := runBrief([]string{"--no-such-flag"}); err == nil {
 		t.Error("a bad flag without --hook should be an error")
 	}
+}
+
+// captureStderr runs fn and returns what it wrote to standard error.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	done := make(chan string)
+	go func() {
+		data, _ := io.ReadAll(r)
+		done <- string(data)
+	}()
+	fn()
+	w.Close()
+	os.Stderr = old
+	return <-done
 }
 
 // Setup offers the brief to each connected agent, and installs it once.
