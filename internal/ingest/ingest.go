@@ -12,7 +12,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/danPoku/kaectx/internal/notelink"
 	"github.com/danPoku/kaectx/internal/redact"
@@ -37,11 +36,18 @@ type FileResult struct {
 func RunAll(db *sql.DB, newAdapter func() Adapter, root string) ([]FileResult, error) {
 	var results []FileResult
 	git := store.NewGitResolver() // shared, so a repo's history is read once for the whole walk
+	probe := newAdapter()         // only asked which files and folders count; never parses
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+		if d.IsDir() {
+			if path != root && SkipsDir(probe, path) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !IsSessionLog(probe, path) {
 			return nil
 		}
 		results = append(results, FileResult{Path: path, Err: run(db, newAdapter(), path, git)})
@@ -77,6 +83,9 @@ func run(db *sql.DB, adapter Adapter, path string, git *store.GitResolver) error
 	src, err := getOrCreateSource(db, adapter.Agent(), path)
 	if err != nil {
 		return err
+	}
+	if b, ok := adapter.(FileBinder); ok {
+		b.BindFile(path)
 	}
 
 	byteOffset := src.ByteOffset
@@ -122,7 +131,13 @@ func run(db *sql.DB, adapter Adapter, path string, git *store.GitResolver) error
 	// case file's cover sheet before the day's new pages, replay the first
 	// line into the adapter and discard the result. Harmless for stateless
 	// adapters.
-	if byteOffset > 0 {
+	//
+	// Skipped when the file has nothing new: no line will be parsed, so
+	// there is nothing to prepare the adapter for. Most files on most scans
+	// are in that state, and for an adapter whose first parse looks
+	// something up (Antigravity reads the conversation's folder from a
+	// database) the saving is one lookup per unchanged file.
+	if byteOffset > 0 && byteOffset < info.Size() {
 		if err := primeAdapter(f, adapter); err != nil {
 			return err
 		}
@@ -300,7 +315,22 @@ func processLine(db *sql.DB, adapter Adapter, git *store.GitResolver, line []byt
 	if res.Message == nil {
 		return sessionID, nil
 	}
-	msg := *res.Message
+	if err := storeMessage(db, git, sessionID, projectID, res.Session.CWD, *res.Message, toolNames, sessionSeq); err != nil {
+		return sessionID, err
+	}
+	for _, m := range res.More {
+		if err := storeMessage(db, git, sessionID, projectID, res.Session.CWD, m, toolNames, sessionSeq); err != nil {
+			return sessionID, err
+		}
+	}
+	return sessionID, nil
+}
+
+// storeMessage redacts one message and inserts it as sessionID's next row,
+// with its file touches. A line usually holds one message; a line that holds
+// several (ParseResult.More) calls this once for each, in order, so each
+// gets its own seq.
+func storeMessage(db *sql.DB, git *store.GitResolver, sessionID string, projectID any, cwd string, msg RawMessage, toolNames map[string]string, sessionSeq map[string]int) error {
 
 	// Resolve a tool_result's name from the tool_call that produced it.
 	// This only sees calls from earlier in THIS ingest run — if a call and
@@ -323,7 +353,7 @@ func processLine(db *sql.DB, adapter Adapter, git *store.GitResolver, line []byt
 	if !ok {
 		var maxSeq sql.NullInt64
 		if err := db.QueryRow(`SELECT MAX(seq) FROM messages WHERE session_id = ?`, sessionID).Scan(&maxSeq); err != nil {
-			return sessionID, err
+			return err
 		}
 		seq = 0
 		if maxSeq.Valid {
@@ -336,11 +366,11 @@ func processLine(db *sql.DB, adapter Adapter, git *store.GitResolver, line []byt
 	                   VALUES (?,?,?,?,?,?,?,?)`,
 		sessionID, seq, msg.Role, msg.Kind, nullIfEmpty(msg.ToolName), msg.Content, nullIfEmpty(msg.CreatedAt), redactedRaw)
 	if err != nil {
-		return sessionID, err
+		return err
 	}
 
 	if len(msg.FileTouches) == 0 {
-		return sessionID, nil
+		return nil
 	}
 	// INSERT OR IGNORE means a re-ingest replaying an already-seen seq
 	// inserts no row — RowsAffected distinguishes that from a genuine new
@@ -349,24 +379,24 @@ func processLine(db *sql.DB, adapter Adapter, git *store.GitResolver, line []byt
 	// leaves it untouched when INSERT OR IGNORE inserts nothing.)
 	affected, err := res2.RowsAffected()
 	if err != nil || affected == 0 {
-		return sessionID, err
+		return err
 	}
 	messageID, err := res2.LastInsertId()
 	if err != nil {
-		return sessionID, err
+		return err
 	}
 	for _, ft := range msg.FileTouches {
 		path := ft.Path
-		path = git.ProjectPath(res.Session.CWD, path)
+		path = git.ProjectPath(cwd, path)
 		rooted := 0
-		if git.Root(res.Session.CWD) != "" {
+		if git.Root(cwd) != "" {
 			rooted = 1
 		}
 		if _, err := db.Exec(`INSERT INTO file_touches(session_id, message_id, project_id, path, action, created_at, rooted)
 		                   VALUES (?,?,?,?,?,?,?)`,
 			sessionID, messageID, projectID, path, ft.Action, nullIfEmpty(msg.CreatedAt), rooted); err != nil {
-			return sessionID, err
+			return err
 		}
 	}
-	return sessionID, nil
+	return nil
 }

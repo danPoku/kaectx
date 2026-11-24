@@ -13,6 +13,7 @@ import (
 
 	"github.com/danPoku/kaectx/internal/daemon"
 	"github.com/danPoku/kaectx/internal/ingest"
+	"github.com/danPoku/kaectx/internal/ingest/antigravity"
 	"github.com/danPoku/kaectx/internal/ingest/claudecode"
 	"github.com/danPoku/kaectx/internal/store"
 )
@@ -170,4 +171,54 @@ func TestRunReIngestsAppendedContent(t *testing.T) {
 	f.Close()
 
 	waitForMessageCount(t, db, 2, 2*time.Second)
+}
+
+// An Antigravity conversation appears as a new folder several levels deep,
+// with other .jsonl files beside the transcript. The daemon must ingest the
+// transcript live and nothing else: the shortened copy would otherwise be
+// stored as a second reading of the same conversation.
+func TestRunIngestsAntigravityTranscriptAndIgnoresItsNeighbours(t *testing.T) {
+	db := openTestDB(t)
+	root := filepath.Join(t.TempDir(), "antigravity-cli", "brain")
+	if err := os.MkdirAll(root, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sources := []daemon.Source{{Agent: "antigravity", Root: root, NewAdapter: func() ingest.Adapter { return antigravity.New() }}}
+	go daemon.Run(ctx, db, sources, time.Hour, 20*time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+
+	logs := filepath.Join(root, "conv-1", ".system_generated", "logs")
+	chunks := filepath.Join(logs, "chunks", "transcript_full")
+	if err := os.MkdirAll(chunks, 0755); err != nil {
+		t.Fatalf("mkdir conversation: %v", err)
+	}
+	line := `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-11-24T08:08:09Z","content":"<USER_REQUEST>\nhello\n</USER_REQUEST>"}` + "\n"
+	for _, path := range []string{
+		filepath.Join(chunks, "00000000.jsonl"),
+		filepath.Join(logs, "transcript.jsonl"),
+		filepath.Join(logs, antigravity.TranscriptName),
+	} {
+		if err := os.WriteFile(path, []byte(line), 0644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	waitForSessionCount(t, db, 1, 3*time.Second)
+	// Long enough for a wrongly scheduled ingest of the other two files to
+	// have run (the debounce is 20ms).
+	time.Sleep(300 * time.Millisecond)
+	var messages, files int
+	if err := db.QueryRow(`SELECT (SELECT count(*) FROM messages), (SELECT count(*) FROM sources)`).Scan(&messages, &files); err != nil {
+		t.Fatal(err)
+	}
+	if messages != 1 || files != 1 {
+		t.Errorf("stored %d message(s) from %d file(s); want 1 from the full transcript only", messages, files)
+	}
+	var id string
+	if err := db.QueryRow(`SELECT id FROM sessions`).Scan(&id); err != nil || id != "antigravity:conv-1" {
+		t.Errorf("session id = %q, %v; want antigravity:conv-1", id, err)
+	}
 }

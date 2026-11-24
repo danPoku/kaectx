@@ -150,7 +150,7 @@ func usage() {
 commands:
   setup [--dry-run] [--yes] [--no-daemon]   connect installed agents, ingest their history, and offer a background service
   init                                create ~/.kae and its database
-  ingest [--path FILE] [--agent A] [--quiet]   ingest sessions (default: scan Claude Code + Codex session dirs)
+  ingest [--path FILE] [--agent A] [--quiet]   ingest sessions (default: scan Claude Code, Codex and Antigravity session dirs)
   embed [--batch N]                   embed pending chunks via a local Ollama for semantic search
   search <query> [--agent A] [--limit N] [--since D] [--until D] [--risk-aware]   search ingested sessions in this project
   brief [--budget N]                  print the short summary of this project an agent is given at session start

@@ -13,6 +13,7 @@ import (
 
 	"github.com/danPoku/kaectx/internal/firstrun"
 	"github.com/danPoku/kaectx/internal/ingest"
+	"github.com/danPoku/kaectx/internal/ingest/antigravity"
 	"github.com/danPoku/kaectx/internal/ingest/claudecode"
 	"github.com/danPoku/kaectx/internal/ingest/codex"
 	"github.com/danPoku/kaectx/internal/store"
@@ -38,12 +39,24 @@ var agentSources = []agentSource{
 		root:       func(home string) string { return filepath.Join(home, ".codex", "sessions") },
 		newAdapter: func() ingest.Adapter { return codex.New() },
 	},
+	{
+		// Antigravity CLI (`agy`), Google's replacement for Gemini CLI.
+		// ~/.gemini/antigravity-cli is where it keeps its data on Windows,
+		// the one platform this was checked on; Linux and macOS are assumed
+		// to match, as Gemini CLI's ~/.gemini did. The root is
+		// brain/, not the data folder: that is where the transcripts are,
+		// and the folder above also holds caches and plugin downloads that
+		// a scan and the daemon's watches have no reason to visit.
+		name:       "antigravity",
+		root:       func(home string) string { return filepath.Join(home, ".gemini", "antigravity-cli", "brain") },
+		newAdapter: func() ingest.Adapter { return antigravity.New() },
+	},
 }
 
 func runIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	path := fs.String("path", "", "ingest a single JSONL file instead of scanning the default session directories")
-	agent := fs.String("agent", "claude-code", "which adapter to use with --path (claude-code or codex)")
+	agent := fs.String("agent", "claude-code", "which adapter to use with --path (claude-code, codex or antigravity)")
 	quiet := fs.Bool("quiet", false, "do not print the summary shown after the first ingest into an empty database")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -174,5 +187,5 @@ func findAgentSource(name string) (agentSource, error) {
 			return src, nil
 		}
 	}
-	return agentSource{}, fmt.Errorf("unknown agent %q (want claude-code or codex)", name)
+	return agentSource{}, fmt.Errorf("unknown agent %q (want claude-code, codex or antigravity)", name)
 }

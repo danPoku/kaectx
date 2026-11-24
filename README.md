@@ -64,8 +64,8 @@ want exactly what those articles show.
 
 ## What it does
 
-- Reads Claude Code and Codex CLI session logs and stores them in
-  `~/.kae/kae.db`.
+- Reads Claude Code, Codex CLI and Antigravity CLI session logs and stores
+  them in `~/.kae/kae.db`.
 - Splits each session into retrieval units: one user turn plus the assistant's
   reply, with tool noise trimmed.
 - Searches them by keyword (SQLite FTS5) and, if you run a local embedding
@@ -245,8 +245,9 @@ xcode-select --install
 go install -tags sqlite_fts5 github.com/danPoku/kaectx/cmd/kae@latest
 ```
 
-Session logs are read from `~/.claude/projects` and `~/.codex/sessions`, and the
-database is `~/.kae/kae.db`, as on Linux.
+Session logs are read from `~/.claude/projects`, `~/.codex/sessions` and
+`~/.gemini/antigravity-cli/brain`, and the database is `~/.kae/kae.db`, as on
+Linux.
 
 For semantic search:
 
@@ -303,7 +304,7 @@ The same steps by hand:
 
 ```
 kae init                          # creates ~/.kae and the database
-kae ingest                        # reads ~/.claude/projects and ~/.codex/sessions
+kae ingest                        # reads the Claude Code, Codex and Antigravity session folders
 ollama pull nomic-embed-text      # optional, enables semantic search
 kae embed                         # embeds chunks that don't have vectors yet
 kae search "refresh token race"   # searches the project you are standing in
@@ -312,8 +313,8 @@ kae explain internal/auth.go      # shows past sessions that touched a file
 
 `kae search` is scoped to the project that contains your current directory;
 `--all-projects` searches every project and names each hit's project, for work
-that spans repos (an API and its frontend, say). Use
-`--agent claude-code` or `--agent codex` to restrict results to one agent,
+that spans repos (an API and its frontend, say). Use `--agent claude-code`,
+`--agent codex` or `--agent antigravity` to restrict results to one agent,
 `--limit N` to change how many come back, and `--since`/`--until` to search one
 period (`--since 2026-09-28 --until 2026-10-04`; a date as `--until` includes
 that whole day, dates are UTC). Equally good matches are listed newest first.
@@ -903,13 +904,21 @@ way.
 
 ## Limitations
 
-- Only Claude Code and Codex CLI are supported. Adapters for other agents don't
-  exist yet. Ingest has been checked against logs from Claude Code 2.1.278 and
-  codex-cli 0.153.0. These formats are undocumented and change without notice,
+- Only Claude Code, Codex CLI and Antigravity CLI are read. Adapters for other
+  agents don't exist yet. Ingest has been checked against logs from Claude Code
+  2.1.278, codex-cli 0.153.0 and Antigravity CLI 1.5.16 (Windows only for
+  Antigravity). These formats are undocumented and change without notice,
   so a new version can break an adapter. kae reports line types it does not
   recognise (`kae doctor`, and the MCP `index.warning`), but it cannot read
   them until the adapter is updated, and a change inside a type it does know
   is not detected.
+- Antigravity CLI (`agy`, Google's replacement for Gemini CLI) is read but not
+  connected: `kae setup` does not register kae's MCP server with it, so its
+  sessions are searchable from Claude Code and Codex while Antigravity itself
+  cannot search yet. Its sessions carry no CLI version, a file it deletes
+  through a shell command is not recorded as touched, and the Antigravity
+  desktop app's own folder (`~/.gemini/antigravity`) is not read. Gemini CLI
+  logs are not read either.
 - kaectx reads logs from the environment where it runs. A native Windows
   process reads Windows agent logs and `%USERPROFILE%\.kae\kae.db`; a Linux or
   WSL process reads Linux agent logs and `~/.kae/kae.db`. The catalogues are
