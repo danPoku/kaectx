@@ -118,6 +118,9 @@ type NoteResult struct {
 	AnchorSeq     int
 	HasSource     bool
 	SourceChunkID int64
+	// Origin is "local" for a note written on this machine and "repo" for
+	// one read from a .kae/memory file in a checkout.
+	Origin string
 }
 
 // Notes runs SearchNotes: keyword search over live (non-superseded) notes,
@@ -144,7 +147,7 @@ func Notes(db *sql.DB, query string, projectID int64, limit int) ([]NoteResult, 
 		var tagsJSON string
 		var agent, sessionID sql.NullString
 		var anchorSeq, chunkID sql.NullInt64
-		if err := rows.Scan(&r.ID, &r.Kind, &r.Title, &r.Body, &tagsJSON, &agent, &r.CreatedAt, &sessionID, &anchorSeq, &chunkID); err != nil {
+		if err := rows.Scan(&r.ID, &r.Kind, &r.Title, &r.Body, &tagsJSON, &agent, &r.CreatedAt, &sessionID, &anchorSeq, &chunkID, &r.Origin); err != nil {
 			return nil, err
 		}
 		r.Agent = agent.String

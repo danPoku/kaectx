@@ -270,6 +270,11 @@ func firstIngest() (string, error) {
 		}
 	}
 	line := fmt.Sprintf("ingested %d session log file(s), %d failed", ok, failed)
+	var shared strings.Builder
+	importSharedNotes(&shared, db)
+	if shared.Len() > 0 {
+		line += "\n" + strings.TrimRight(shared.String(), "\n")
+	}
 	// The same report `kae ingest` gives when it fills an empty database.
 	// For most people setup is that first ingest, so this is where they
 	// learn what kae already knows.

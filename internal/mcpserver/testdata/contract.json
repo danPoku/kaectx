@@ -1,5 +1,5 @@
 {
-  "contract_version": "0.1",
+  "contract_version": "0.2",
   "tools": [
     {
       "name": "checkpoint_status",
@@ -1169,6 +1169,9 @@
                 "next_step": {
                   "type": "string"
                 },
+                "origin": {
+                  "type": "string"
+                },
                 "session_id": {
                   "type": "string"
                 },
@@ -1190,7 +1193,8 @@
                 "kind",
                 "title",
                 "body",
-                "created_at"
+                "created_at",
+                "origin"
               ],
               "type": "object"
             },

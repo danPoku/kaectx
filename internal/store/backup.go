@@ -17,7 +17,7 @@ import (
 // applies. A database whose schema_migrations has no row for it has work
 // pending. It must be raised with every new migration; TestLatestMigration
 // fails if it is not.
-const LatestMigration = 20
+const LatestMigration = 21
 
 // BackupsKept is how many pre-migration backups are kept.
 const BackupsKept = 3

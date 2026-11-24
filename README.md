@@ -556,7 +556,7 @@ the session.
 | `sessions_touching` | Sessions that read or edited a given file. |
 | `explain_file` | Builds a compact briefing for a file: sessions that touched it, actions, known git commit span, and chunk ids to open for the reasoning behind the work. |
 | `save_note` | Records a decision, gotcha, convention, todo, or fact. Pass `supersedes` with the ID of an earlier note in this project to retire it in the same step: the result echoes it as `superseded`, and `search_notes` stops returning it. A `supersedes` that names a missing note, another project's note, or a note already superseded is an error and saves nothing; the error names the live successor where there is one. |
-| `search_notes` | Searches saved notes. Returns current notes only; a note retired with `supersedes` is kept as history but not returned. Each call that returns notes is recorded, with the notes it returned in rank order, under the `run_id` in the result. A note whose source is known also carries `session_id`, `anchor_seq` (the first message of the exchange it was saved in) and `next_step`, the call that opens that exchange; all three are absent when the source is unknown. |
+| `search_notes` | Searches saved notes. Returns current notes only; a note retired with `supersedes` is kept as history but not returned. Each call that returns notes is recorded, with the notes it returned in rank order, under the `run_id` in the result. Each note has an `origin`: `local` for one written on this machine, `repo` for one read from a `.kae/memory` file in the checkout. A note whose source is known also carries `session_id`, `anchor_seq` (the first message of the exchange it was saved in) and `next_step`, the call that opens that exchange; all three are absent when the source is unknown. |
 | `record_retrieval_outcome` | Labels retrieved evidence as helpful, unhelpful, stale, incorrect or superseded. Pass the exact search run ID and rank returned by `search_context` or `get_chunk`. A label on a hit from another project counts toward that project's evidence, not the caller's. |
 | `record_search_outcome` | Records whether a search as a whole answered the question (helpful, partial or unhelpful) and, when it fell short, why (`wrong_project`, `not_indexed`, `stale_state`, `ranking`). Pass the search's run ID. Meant for every search: one answered by its snippets alone, with nothing opened, is `helpful`. Never changes a result's reliability; a second call for the same search replaces the first. |
 | `get_brief` | Returns the session-start brief for this project: the latest handoff note, recent sessions with the files they changed, and the files changed most in the past week, within a token `budget` (default 600). `text` is empty for a project with no history. Meant to be called once at the start of a session by an agent that was not given the brief by a hook. A handoff it includes is named in `handoff_note_id` and recorded as picked up. |
@@ -566,8 +566,8 @@ the session.
 | `record_checkpoint_outcome` | Records whether the user started a new session, saved a handoff, continued, or dismissed a checkpoint recommendation. After a healthy check only `continued` can be recorded. With `saved_handoff`, pass `note_id` (the ID `save_note` returned for the handoff, a note in this project) so `kae doctor` can report whether a later note search returned it. |
 
 The names of these tools, their arguments and the fields of their results
-form a versioned contract. Its version, currently **0.1**, is in the server's
-instructions (`Tool contract version: 0.1.`) and in `kae doctor` as
+form a versioned contract. Its version, currently **0.2**, is in the server's
+instructions (`Tool contract version: 0.2.`) and in `kae doctor` as
 `contract_version`. Additions raise the minor number. Nothing is removed or
 renamed without a major bump and at least one release in which the old form
 still works and is marked deprecated. A test compares the running server with
@@ -675,6 +675,7 @@ first_seq and last_seq rather than paging from the start.
 | `kae project merge <from> <into>` | Fold one project into another. |
 | `kae project exclude <id> [--forget] [--yes]` | Stop ingesting a project. `--forget` also deletes the sessions already stored for it. |
 | `kae project include <id>` | Ingest an excluded project again; the next ingest reads what was skipped. |
+| `kae export-memory [--all] [note-id ...]` | Write chosen notes to `.kae/memory/` in the repository, to share them through it. With no arguments, lists what could be shared, or refreshes what already is. |
 | `kae forget <session-id> [--yes]` | Delete a session and everything stored from it, and never ingest it again. Asks first. |
 | `kae ui [--port N] [--allow-edits]` | Browse projects, sessions, notes and search in a local web page on `127.0.0.1`, behind a per-run token. Read-only unless `--allow-edits`. |
 | `kae audit-secrets` | Re-scan stored text with the current redaction rules and report rows and rule names (never the matched text). Exits non-zero on findings. Changes nothing. |
@@ -690,6 +691,60 @@ been deleted or moved can no longer have its git remote looked up, so it lands
 in a project of its own. Merging moves the sessions, paths, notes and file
 touches, refuses to merge two projects that both have a remote, and queues the
 moved chunks for re-embedding.
+
+## Sharing notes with your team, through the repository
+
+Each machine keeps its own catalogue, so a decision your agent recorded on your
+laptop is unknown on the server and to your teammates. kae shares notes the
+way a team already shares everything else: as files in the repository.
+
+```
+kae export-memory            # list the notes that could be shared
+kae export-memory 12 15      # share notes 12 and 15
+kae export-memory --all      # share every decision, gotcha, convention and fact
+git add .kae/memory && git commit -m "docs: share kae notes"
+```
+
+Each shared note becomes one Markdown file in `.kae/memory/` at the repository
+root:
+
+```markdown
+---
+kae: 1
+id: 3f2a9c1e5b7d
+kind: decision
+title: "Use pgx over database/sql"
+date: 2026-11-23
+agent: "claude-code"
+source_commit: a1b2c3d4e5f6
+tags: ["db"]
+---
+
+We need LISTEN/NOTIFY, which database/sql does not expose.
+```
+
+On every machine with the checkout, `kae ingest` (and the daemon, and an
+agent's MCP server when it catches up) reads that folder. The notes then
+appear in `search_notes` with `origin: "repo"`, and the newest three lead the
+[session-start brief](#the-session-start-brief). Edit a file and the note
+changes at the next ingest; delete it and the note goes.
+
+What to know:
+
+- **Nothing is shared by default.** Naming a note, or `--all`, is the
+  approval. After that, every `kae export-memory` keeps its file current, and
+  removes the file if the note is superseded. kae writes the files and stops:
+  committing them is yours to do, so they go through the same review as code.
+- **Only notes, never transcripts.** Decisions, gotchas, conventions and
+  facts. Todos and handoffs are not offered.
+- **Redacted on the way out and on the way in.** The title, body and tags
+  pass through the redaction rules before a file is written, the file's name
+  is made from the redacted title, and a note that still matches a rule is
+  not written. Files are redacted again when read, since anyone can edit them.
+- **Your own export is not counted twice.** The `id` in the file ties it to
+  your local note; on your machine the note stays `local`.
+- A file in the folder that is not a shared note (a README, say) is skipped
+  with a warning.
 
 ## What kae did for you
 
@@ -934,6 +989,7 @@ internal/mcpserver/  the MCP tools
 internal/daemon/     filesystem watching
 internal/inspector/  the local web page behind kae ui
 internal/report/     the figures behind kae report
+internal/sharedmem/  notes exported to, and read from, .kae/memory in a repository
 internal/vecext/     vendored sqlite-vec and its cgo registration
 migrations/          SQL schema
 queries/             named SQL queries

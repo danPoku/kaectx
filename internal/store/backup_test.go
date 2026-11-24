@@ -31,10 +31,13 @@ func olderDatabase(t *testing.T) (*sql.DB, string) {
 	}
 	for _, stmt := range []string{
 		`INSERT INTO projects(name) VALUES ('before-upgrade')`,
-		`DELETE FROM schema_migrations WHERE version = 20`,
-		`DROP TABLE forgotten_sessions`,
-		`ALTER TABLE projects DROP COLUMN excluded_at`,
-		`ALTER TABLE sources DROP COLUMN skipped_excluded`,
+		// Undo the newest migration (021). When a migration is added, this
+		// list must undo that one instead; TestLatestMigration and the
+		// version checks below fail loudly if it is forgotten.
+		`DELETE FROM schema_migrations WHERE version = 21`,
+		`DROP INDEX idx_notes_share`,
+		`ALTER TABLE notes DROP COLUMN share_id`,
+		`ALTER TABLE notes DROP COLUMN origin`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("%s: %v", stmt, err)
@@ -73,7 +76,7 @@ func TestBackupBeforeAPendingMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(dir, "kae-s19-20261124T093000Z.db"); path != want {
+	if want := filepath.Join(dir, "kae-s20-20261124T093000Z.db"); path != want {
 		t.Fatalf("backup path %q, want %q", path, want)
 	}
 	// Then the migration runs, as openStore does next.
@@ -93,9 +96,9 @@ func TestBackupBeforeAPendingMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	backup.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version)
-	backup.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name = 'forgotten_sessions'`).Scan(&newTable)
-	if projects != 1 || version != 19 || newTable != 0 {
-		t.Fatalf("backup has %d project(s), schema %d, new table present=%d; want 1, 19, 0", projects, version, newTable)
+	backup.QueryRow(`SELECT count(*) FROM pragma_table_info('notes') WHERE name = 'origin'`).Scan(&newTable)
+	if projects != 1 || version != 20 || newTable != 0 {
+		t.Fatalf("backup has %d project(s), schema %d, new column present=%d; want 1, 20, 0", projects, version, newTable)
 	}
 	var check string
 	if err := backup.QueryRow(`PRAGMA integrity_check`).Scan(&check); err != nil || check != "ok" {
@@ -170,7 +173,7 @@ func TestOnlyThreeBackupsAreKept(t *testing.T) {
 		if want := paths[len(paths)-1-i]; b.Path != want {
 			t.Errorf("backup %d is %s, want %s", i, filepath.Base(b.Path), filepath.Base(want))
 		}
-		if b.SchemaVersion != 19 || b.Size == 0 {
+		if b.SchemaVersion != 20 || b.Size == 0 {
 			t.Errorf("backup %d: schema %d, size %d", i, b.SchemaVersion, b.Size)
 		}
 	}

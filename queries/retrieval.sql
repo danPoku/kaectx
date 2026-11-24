@@ -421,12 +421,15 @@ SELECT s.project_id, p.name
 -- save_note call has been found in an ingested log), and source_chunk_id is
 -- the chunk holding that message today, looked up by range rather than
 -- stored, because chunks are rebuilt and their ids change.
+-- origin is 'local' for a note written on this machine and 'repo' for one
+-- read from a .kae/memory file in a checkout.
 SELECT n.id, n.kind, n.title, n.body, n.tags, n.agent, n.created_at,
        n.session_id, n.anchor_seq,
        (SELECT c.id FROM chunks c
          WHERE c.session_id = n.session_id
            AND n.anchor_seq BETWEEN c.first_seq AND c.last_seq
-         ORDER BY c.first_seq LIMIT 1) AS source_chunk_id
+         ORDER BY c.first_seq LIMIT 1) AS source_chunk_id,
+       n.origin
   FROM notes_fts
   JOIN notes n ON n.id = notes_fts.rowid
  WHERE notes_fts MATCH :query

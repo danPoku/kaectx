@@ -102,6 +102,8 @@ func runIngest(args []string) error {
 		}
 	}
 	fmt.Printf("ingested %d file(s), %d failed\n", ok, failed)
+	// Notes shared through a repository are read in with the logs.
+	importSharedNotes(os.Stdout, db)
 	if before == 0 && !*quiet {
 		summary, err := firstRunSummary(db)
 		if err != nil {

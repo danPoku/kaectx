@@ -32,10 +32,13 @@ func olderCatalogue(t *testing.T, home string) string {
 	}
 	for _, stmt := range []string{
 		`INSERT INTO projects(name) VALUES ('before-upgrade')`,
-		`DELETE FROM schema_migrations WHERE version = 20`,
-		`DROP TABLE forgotten_sessions`,
-		`ALTER TABLE projects DROP COLUMN excluded_at`,
-		`ALTER TABLE sources DROP COLUMN skipped_excluded`,
+		// Undo the newest migration (021). When a migration is added, this
+		// list must undo that one instead; TestLatestMigration and the
+		// version checks below fail loudly if it is forgotten.
+		`DELETE FROM schema_migrations WHERE version = 21`,
+		`DROP INDEX idx_notes_share`,
+		`ALTER TABLE notes DROP COLUMN share_id`,
+		`ALTER TABLE notes DROP COLUMN origin`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("%s: %v", stmt, err)
@@ -66,8 +69,8 @@ func TestOpenStoreBacksUpBeforeMigrating(t *testing.T) {
 		t.Errorf("the user was not told about the backup: %q", notice)
 	}
 	backups, err := store.ListBackups(filepath.Join(dir, "backups"))
-	if err != nil || len(backups) != 1 || backups[0].SchemaVersion != 19 {
-		t.Fatalf("want one backup at schema 19, got %+v, %v", backups, err)
+	if err != nil || len(backups) != 1 || backups[0].SchemaVersion != 20 {
+		t.Fatalf("want one backup at schema 20, got %+v, %v", backups, err)
 	}
 
 	// The next command finds nothing pending: no new backup, no notice.
@@ -107,7 +110,7 @@ func TestOpenStoreRefusesToMigrateWithoutABackup(t *testing.T) {
 	var version int
 	check.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version)
 	check.Close()
-	if version != 19 {
+	if version != 20 {
 		t.Fatalf("the schema was updated to %d although the backup failed", version)
 	}
 

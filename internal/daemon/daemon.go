@@ -19,6 +19,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/danPoku/kaectx/internal/ingest"
+	"github.com/danPoku/kaectx/internal/sharedmem"
 )
 
 // Source is one agent's session tree: where it lives, and how to get a
@@ -109,6 +110,12 @@ func Run(ctx context.Context, db *sql.DB, sources []Source, fallbackInterval, de
 				// exist yet gets picked up — Add is harmless to repeat on
 				// an already-watched path.
 				addWatchesRecursive(watcher, src.Root)
+			}
+			// The periodic rescan is also when notes shared through a
+			// repository are picked up: a `git pull` writes no agent log,
+			// so there is no file event to react to.
+			if _, err := sharedmem.ImportAll(db); err != nil {
+				log.Printf("kae daemon: shared notes: %v", err)
 			}
 		}
 	}
