@@ -98,6 +98,11 @@ type noteHit struct {
 	// NextStep is the call that opens that exchange, so an agent that finds a
 	// decision can read the conversation behind it, not just the rule.
 	NextStep string `json:"next_step,omitempty"`
+	// Origin says where the note lives: "local" was written on this machine
+	// (save_note, kae handoff); "repo" was read from a .kae/memory file in
+	// the project's checkout, which means it was shared on purpose and went
+	// through whatever review the repository has.
+	Origin string `json:"origin"`
 }
 
 type searchNotesResult struct {
@@ -199,7 +204,7 @@ func (s *server) searchNotes(_ context.Context, _ *mcp.CallToolRequest, args sea
 	for i, r := range rows {
 		out.Notes[i] = noteHit{
 			ID: r.ID, Kind: r.Kind, Title: r.Title, Body: r.Body,
-			Tags: r.Tags, Agent: r.Agent, CreatedAt: r.CreatedAt,
+			Tags: r.Tags, Agent: r.Agent, CreatedAt: r.CreatedAt, Origin: r.Origin,
 		}
 		if r.HasSource {
 			anchor := r.AnchorSeq

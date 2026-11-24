@@ -142,6 +142,9 @@ func Migrate(db *sql.DB) (MigrateResult, error) {
 	if err := applySQLMigration(db, 20, "020_forget_exclude.sql"); err != nil {
 		return MigrateResult{}, err
 	}
+	if err := applySQLMigration(db, 21, "021_note_origin.sql"); err != nil {
+		return MigrateResult{}, err
+	}
 	return result, nil
 }
 

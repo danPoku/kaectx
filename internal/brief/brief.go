@@ -76,12 +76,22 @@ type Brief struct {
 	Handoff  *Handoff
 	Sessions []Session
 	Files    []File
+	// Shared are the newest notes read from the repository's .kae/memory
+	// folder: what teammates chose to circulate.
+	Shared []SharedNote
+}
+
+// SharedNote is a note that came from the repository.
+type SharedNote struct {
+	Kind, Title string
 }
 
 // Empty reports whether there is nothing to tell.
 func (b Brief) Empty() bool {
-	return b.Handoff == nil && len(b.Sessions) == 0 && len(b.Files) == 0
+	return b.Handoff == nil && len(b.Sessions) == 0 && len(b.Files) == 0 && len(b.Shared) == 0
 }
+
+const maxShared = 3
 
 const (
 	maxSessions      = 5
@@ -105,6 +115,25 @@ func Build(db *sql.DB, projectID int64, now time.Time) (Brief, error) {
 		return b, err
 	}
 	b.Handoff = h
+
+	srows, err := db.Query(`SELECT kind, title FROM notes
+		WHERE project_id = ? AND origin = 'repo' AND superseded_by IS NULL
+		ORDER BY updated_at DESC, id DESC LIMIT ?`, projectID, maxShared)
+	if err != nil {
+		return b, err
+	}
+	for srows.Next() {
+		var n SharedNote
+		if err := srows.Scan(&n.Kind, &n.Title); err != nil {
+			srows.Close()
+			return b, err
+		}
+		b.Shared = append(b.Shared, n)
+	}
+	srows.Close()
+	if err := srows.Err(); err != nil {
+		return b, err
+	}
 
 	// Subagent transcripts are left out: they are parts of a session the
 	// user never saw as a session of their own.
@@ -292,6 +321,18 @@ func (b Brief) Render(budget int) Rendered {
 			out.HandoffNoteID = h.NoteID
 			add(text)
 			add(source)
+		}
+	}
+
+	// Notes from the repository come before the sessions: they are what the
+	// team decided everyone should know, where a session list is only what
+	// happened to be done last.
+	if len(b.Shared) > 0 && add("\nShared through the repo (.kae/memory):\n") {
+		for _, n := range b.Shared {
+			title := oneLine(n.Title, 80)
+			if !add(fmt.Sprintf("- %s: %s  search_notes(query=%q)\n", n.Kind, title, title)) {
+				break
+			}
 		}
 	}
 

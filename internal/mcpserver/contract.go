@@ -28,4 +28,4 @@ package mcpserver
 //	go test -tags sqlite_fts5 ./internal/mcpserver -run TestContract -update
 //
 // and say what changed in the pull request.
-const ContractVersion = "0.1"
+const ContractVersion = "0.2"

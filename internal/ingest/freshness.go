@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/danPoku/kaectx/internal/sharedmem"
 )
 
 // Root is one agent's session tree: where its logs live and how to get a
@@ -151,6 +154,13 @@ func CatchUp(db *sql.DB, roots []Root, lockPath string) ([]FileResult, error) {
 		if err != nil {
 			return all, fmt.Errorf("%s: %w", root.Agent, err)
 		}
+	}
+	// Notes shared through a repository (.kae/memory) are read in with the
+	// logs, so an agent whose MCP server catches up also sees what a
+	// teammate committed. A failure here is not a failed catch-up: the
+	// session logs were read.
+	if _, err := sharedmem.ImportAll(db); err != nil {
+		fmt.Fprintf(os.Stderr, "kae: warning: reading shared notes from repositories: %v\n", err)
 	}
 	return all, nil
 }
