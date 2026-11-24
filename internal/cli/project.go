@@ -5,16 +5,18 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 
 	"github.com/danPoku/kaectx/internal/store"
 )
 
-// runProject handles `kae project ...`. Today that is only `list` and
-// `merge`; the list exists so the ids merge needs are discoverable.
+// runProject handles `kae project ...`: `list`, `merge`, and `exclude` /
+// `include`, which turn ingest off and on for a project. The list exists so
+// the ids the others need are discoverable.
 func runProject(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: kae project list | kae project merge <from-id> <into-id>")
+		return fmt.Errorf("usage: kae project list | merge <from-id> <into-id> | exclude <id> [--forget] | include <id>")
 	}
 
 	db, _, err := openStore()
@@ -25,7 +27,8 @@ func runProject(args []string) error {
 
 	switch args[0] {
 	case "list":
-		rows, err := db.Query(`SELECT p.id, p.name, COALESCE(p.git_remote, '-'),
+		rows, err := db.Query(`SELECT p.id, p.name || CASE WHEN p.excluded_at IS NOT NULL THEN ' (excluded)' ELSE '' END,
+				COALESCE(p.git_remote, '-'),
 				(SELECT count(*) FROM sessions s WHERE s.project_id = p.id),
 				COALESCE((SELECT group_concat(path, ', ') FROM project_paths pp WHERE pp.project_id = p.id), '')
 			FROM projects p ORDER BY p.id`)
@@ -44,6 +47,12 @@ func runProject(args []string) error {
 		}
 		return rows.Err()
 
+	case "exclude":
+		return projectExclude(os.Stdout, os.Stdin, db, args[1:], true)
+
+	case "include":
+		return projectExclude(os.Stdout, os.Stdin, db, args[1:], false)
+
 	case "merge":
 		if len(args) != 3 {
 			return fmt.Errorf("usage: kae project merge <from-id> <into-id>")
@@ -59,5 +68,5 @@ func runProject(args []string) error {
 		fmt.Printf("merged project %d into %d; run `kae embed` to re-embed moved chunks\n", from, into)
 		return nil
 	}
-	return fmt.Errorf("unknown subcommand %q (want list or merge)", args[0])
+	return fmt.Errorf("unknown subcommand %q (want list, merge, exclude or include)", args[0])
 }

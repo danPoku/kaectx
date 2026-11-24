@@ -662,6 +662,10 @@ first_seq and last_seq rather than paging from the start.
 | `kae repair git\|touches\|messages\|projects\|notes [--dry-run]` | Bring data ingested by older versions up to date (see [Quick start](#quick-start)). |
 | `kae project list` | Show projects, their remotes, session counts and known paths. |
 | `kae project merge <from> <into>` | Fold one project into another. |
+| `kae project exclude <id> [--forget] [--yes]` | Stop ingesting a project. `--forget` also deletes the sessions already stored for it. |
+| `kae project include <id>` | Ingest an excluded project again; the next ingest reads what was skipped. |
+| `kae forget <session-id> [--yes]` | Delete a session and everything stored from it, and never ingest it again. Asks first. |
+| `kae ui [--port N] [--allow-edits]` | Browse projects, sessions, notes and search in a local web page on `127.0.0.1`, behind a per-run token. Read-only unless `--allow-edits`. |
 | `kae audit-secrets` | Re-scan stored text with the current redaction rules and report rows and rule names (never the matched text). Exits non-zero on findings. Changes nothing. |
 | `kae doctor` | Report the current project's sessions, embedding backlog, retrievals, outcomes, search outcomes, checkpoint checks (by level and by what the user did next) and handoff pickup (handoffs saved at a checkpoint or with `kae handoff`, and how many were read within 7 days through a note search, the brief, `kae resume` or `get_handoff`), plus database-wide source, ingest-error and unassigned-chunk counts, and the log line types the adapters skipped without recognising (agent, version, type, count, first and last seen). |
 | `kae mcp` | Serve MCP over stdio. Catches up on unread session logs in the background. |
@@ -674,6 +678,48 @@ been deleted or moved can no longer have its git remote looked up, so it lands
 in a project of its own. Merging moves the sessions, paths, notes and file
 touches, refuses to merge two projects that both have a remote, and queues the
 moved chunks for re-embedding.
+
+## Seeing and correcting what kae holds
+
+kae reads everything your agents write, so you can look at what it kept and
+take things back.
+
+```
+kae ui                     # browse in a local web page, read-only
+kae ui --allow-edits       # also edit or delete notes, forget sessions, exclude projects
+kae forget <session-id>    # delete one session, for good
+kae project exclude <id>   # stop ingesting a repository
+```
+
+**`kae ui`** prints one link and serves until you press Ctrl+C. The pages list
+projects, their sessions, each session's messages (tool calls and thinking
+folded away), every note, and a keyword search across all projects that shows
+the labels agents recorded on each result. With `--allow-edits` they also
+offer the actions below, each behind a confirmation page.
+
+It is built to be safe to run on a machine other people or programs share:
+
+- It listens on `127.0.0.1` only, and there is no flag to change that. To
+  reach it from another machine, forward the port over SSH.
+- The link contains a random access token made for that run. A request
+  without it gets a 404, as does one whose `Host` is not this machine.
+- It is read-only unless you pass `--allow-edits`. Changes are form posts,
+  refused if they come from another site.
+- There is no JavaScript, and stored text is always shown as text.
+
+**Forgetting a session** (`kae forget <session-id>`, or the session's page)
+deletes its messages, its search entries and vectors, and its file records,
+and puts its id on a list ingest checks, so it stays gone after `kae ingest`,
+a daemon rescan or the log file being rewritten. The id can be the full
+`claude-code:91ae…`, the part after the colon, or an unambiguous prefix. The
+agent's own log file is not touched. Notes saved in the session are kept.
+There is no undo.
+
+**Excluding a project** (`kae project exclude <id>`, ids from
+`kae project list`) stops ingest storing anything more for it: no new
+sessions, and no new lines for sessions already held. What was stored before
+is kept unless you add `--forget`. `kae project include <id>` turns it back
+on, and the next `kae ingest` reads what was passed over in the meantime.
 
 ## How it works
 
@@ -777,7 +823,9 @@ way.
   `nomic-embed-text`. Expect to revisit it with a larger history or a different
   model.
 - If a log file is rewritten so that it no longer mentions a session, that
-  session's old rows stay in the database.
+  session's old rows stay in the database until you `kae forget` it.
+- Forgetting a session removes it from kae, not from the agent's own log
+  files, and not from a backup or copy of the database made earlier.
 - There are no session summaries. The `summary` column exists and is unused.
 - Redaction is best effort, as described above.
 - On macOS the test suite runs in CI on Apple Silicon, but kae has not yet been
@@ -825,6 +873,7 @@ internal/embed/      Ollama client and the embedding worker
 internal/search/     keyword and hybrid queries
 internal/mcpserver/  the MCP tools
 internal/daemon/     filesystem watching
+internal/inspector/  the local web page behind kae ui
 internal/vecext/     vendored sqlite-vec and its cgo registration
 migrations/          SQL schema
 queries/             named SQL queries
