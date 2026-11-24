@@ -76,6 +76,22 @@ type ParseResult struct {
 	// permission-mode, environment attachments, ...) that isn't
 	// conversation and carries no session update either.
 	Skip bool
+	// Unknown is set, together with Skip, when the adapter skipped the line
+	// not because it knows the type to be bookkeeping but because it has
+	// never seen the type at all. The two look the same to the database
+	// (nothing is stored) and must not look the same to the user: a known
+	// bookkeeping line is noise, while a new type may be the conversation
+	// itself in a format a newer agent version started writing. Like a
+	// sorting office that bins circulars but must log an envelope it cannot
+	// read the address on.
+	//
+	// The value is the type as the agent wrote it. A nested type carries
+	// its parent: "response_item/function_call", "content/document". The
+	// driver counts these per source file; see recordUnknown. For an
+	// unknown line the adapter also fills Session.Version and
+	// Session.Timestamp when the log has them, so the report can say which
+	// agent version started writing the type and when.
+	Unknown string
 }
 
 // Adapter turns one agent's raw log format into the driver's normalized

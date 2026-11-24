@@ -102,12 +102,42 @@ func (a Adapter) ParseLine(raw []byte) (ingest.ParseResult, error) {
 		upd.Title = l.AITitle
 		return ingest.ParseResult{Session: upd}, nil
 	default:
-		// mode, permission-mode, atis-latch, last-prompt,
-		// file-history-snapshot, file-history-delta, attachment, and any
-		// future bookkeeping type we don't recognize yet: not
-		// conversation, nothing to store.
-		return ingest.ParseResult{Skip: true}, nil
+		if bookkeeping[l.Type] {
+			// Known not to be conversation: nothing to store.
+			return ingest.ParseResult{Skip: true}, nil
+		}
+		// A type this adapter has never seen. Still nothing to store, but
+		// say so, so that a format change is reported instead of ingest
+		// quietly storing less.
+		return unknown(l, l.Type), nil
 	}
+}
+
+// bookkeeping lists the line types that are known to carry no conversation:
+// UI state, telemetry, and pointers between files. Every entry was read from
+// real Claude Code logs (versions up to 2.1.3xx); none is a guess. A type
+// missing from this list is reported as unknown, which is the point: adding
+// one here is a decision that someone looked at it and found nothing worth
+// keeping.
+var bookkeeping = map[string]bool{
+	"mode": true, "permission-mode": true, "atis-latch": true, "isolation-latch": true,
+	"last-prompt": true, "queue-operation": true,
+	"file-history-snapshot": true, "file-history-delta": true, "attachment": true,
+	"api-request": true, "api-request-blob": true, "api-request-shape": true,
+	"session-owner": true, "agent-name": true, "custom-title": true,
+	"pr-link": true, "frame-link": true, "fork-context-ref": true, "relocated": true,
+	"tools-used": true, "cost-state": true, "worktree-state": true,
+	"artifact-autoreact-ledger": true, "artifact-comment-monitor": true,
+}
+
+// unknown builds the result for a line whose type, named name, the adapter
+// does not recognise. The session fields are filled only so the driver can
+// report the agent version and time; a skipped line updates no session.
+func unknown(l line, name string) ingest.ParseResult {
+	if name == "" {
+		name = "(no type)"
+	}
+	return ingest.ParseResult{Skip: true, Unknown: name, Session: sessionUpdate(l)}
 }
 
 func sessionUpdate(l line) ingest.SessionUpdate {
@@ -195,7 +225,10 @@ func (a Adapter) parseConversational(l line, raw []byte) (ingest.ParseResult, er
 		msg.ToolUseID = b.ToolUseID
 		msg.Content = flattenToolResultContent(b.Content)
 	default:
-		return ingest.ParseResult{Skip: true}, nil
+		// A content block of a kind this adapter does not read. The whole
+		// line is dropped, including any text that follows the block, so it
+		// is reported under "content/<kind>".
+		return unknown(l, "content/"+b.Type), nil
 	}
 	return ingest.ParseResult{Message: msg, Session: upd}, nil
 }

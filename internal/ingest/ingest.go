@@ -136,6 +136,7 @@ func run(db *sql.DB, adapter Adapter, path string, git *store.GitResolver) error
 		purged = map[string]bool{}
 	}
 	touched := map[string]bool{}
+	unknown := unknownTally{} // lines skipped because their type is not recognised
 	var lastErr string
 	consumed := byteOffset
 
@@ -157,7 +158,7 @@ func run(db *sql.DB, adapter Adapter, path string, git *store.GitResolver) error
 		if len(bytes.TrimSpace(trimmed)) == 0 {
 			continue
 		}
-		sid, err := processLine(db, adapter, git, trimmed, toolNames, sessionSeq, purged)
+		sid, err := processLine(db, adapter, git, trimmed, toolNames, sessionSeq, purged, unknown)
 		if err != nil {
 			lastErr = err.Error()
 			continue
@@ -177,6 +178,12 @@ func run(db *sql.DB, adapter Adapter, path string, git *store.GitResolver) error
 		if _, err := notelink.LinkSession(db, sid); err != nil {
 			lastErr = err.Error()
 		}
+	}
+
+	// Like chunking, a failure to store the tally is logged against the
+	// source and never stops the ingest.
+	if err := recordUnknown(db, src.ID, adapter.Agent(), rewound, unknown); err != nil {
+		lastErr = err.Error()
 	}
 
 	newHeadHash, err := headHashUpTo(f, consumed)
@@ -221,12 +228,19 @@ func headHashUpTo(f *os.File, offset int64) (string, error) {
 // chunking afterward), or "" if the line carried no session information at
 // all (shouldn't happen for a well-formed conversational or ai-title line,
 // but Skip lines legitimately return "").
-func processLine(db *sql.DB, adapter Adapter, git *store.GitResolver, line []byte, toolNames map[string]string, sessionSeq map[string]int, purged map[string]bool) (string, error) {
+func processLine(db *sql.DB, adapter Adapter, git *store.GitResolver, line []byte, toolNames map[string]string, sessionSeq map[string]int, purged map[string]bool, unknown unknownTally) (string, error) {
 	res, err := adapter.ParseLine(line)
 	if err != nil {
 		return "", err
 	}
 	if res.Skip {
+		if res.Unknown != "" {
+			sessionID := ""
+			if res.Session.NativeID != "" {
+				sessionID = adapter.Agent() + ":" + res.Session.NativeID
+			}
+			unknown.add(sessionID, res.Unknown, res.Session.Version, res.Session.Timestamp)
+		}
 		return "", nil
 	}
 	if res.Session.NativeID == "" {

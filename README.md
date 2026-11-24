@@ -366,7 +366,9 @@ Without the daemon, `kae mcp` closes most of the gap itself: it catches up on
 unread logs in the background when an agent starts it, and again when a search
 finds logs it hasn't read. `search_context` and `recent_sessions` report this
 in an `index` field, with a `warning` while logs are still unread, so an agent
-can say "kae is behind" instead of "nothing happened". A lock file
+can say "kae is behind" instead of "nothing happened". The same `warning`
+names log line types kae did not recognise in the project's recent sessions
+(see [How it works](#how-it-works)). A lock file
 (`~/.kae/ingest.lock`) keeps several MCP servers from catching up at once. The
 daemon is still the way to keep the index current between sessions.
 
@@ -584,7 +586,7 @@ first_seq and last_seq rather than paging from the start.
 | `kae project list` | Show projects, their remotes, session counts and known paths. |
 | `kae project merge <from> <into>` | Fold one project into another. |
 | `kae audit-secrets` | Re-scan stored text with the current redaction rules and report rows and rule names (never the matched text). Exits non-zero on findings. Changes nothing. |
-| `kae doctor` | Report the current project's sessions, embedding backlog, retrievals, outcomes, search outcomes, checkpoint checks (by level and by what the user did next) and handoff pickup (handoffs saved, and how many a note search returned within 7 days), plus database-wide source, ingest-error and unassigned-chunk counts. |
+| `kae doctor` | Report the current project's sessions, embedding backlog, retrievals, outcomes, search outcomes, checkpoint checks (by level and by what the user did next) and handoff pickup (handoffs saved, and how many a note search returned within 7 days), plus database-wide source, ingest-error and unassigned-chunk counts, and the log line types the adapters skipped without recognising (agent, version, type, count, first and last seen). |
 | `kae mcp` | Serve MCP over stdio. Catches up on unread session logs in the background. |
 | `kae daemon` | Ingest and embed continuously. |
 | `kae version` | Print the version of this binary. |
@@ -605,6 +607,15 @@ a file that only grows is read from where it left off, and a file whose earlier
 bytes changed is read again from the start with the old rows replaced. A line
 that can't be parsed is recorded in `sources.last_error` and skipped; it never
 stops the rest of the file.
+
+A line of a type the adapter has never seen is skipped too, and counted, by
+agent, type and agent version, with the first and last time it appeared. Known
+bookkeeping types (UI state, telemetry) are not counted. `kae doctor` lists
+the unknown types, and `search_context` and `recent_sessions` add them to
+`index.warning` for two weeks after they were last seen in the project. So
+when an agent update changes its log format, kae says "Codex 0.160 writes a
+type I do not read" instead of quietly storing less. The counts start with the
+first ingest after upgrading; nothing is backfilled.
 
 **Chunks.** A chunk is one user turn and the assistant's reply. A turn is
 indexed when the next user message arrives. The last turn of a session is
@@ -658,7 +669,10 @@ way.
 - Only Claude Code and Codex CLI are supported. Adapters for other agents don't
   exist yet. Ingest has been checked against logs from Claude Code 2.1.278 and
   codex-cli 0.153.0. These formats are undocumented and change without notice,
-  so a new version can break an adapter.
+  so a new version can break an adapter. kae reports line types it does not
+  recognise (`kae doctor`, and the MCP `index.warning`), but it cannot read
+  them until the adapter is updated, and a change inside a type it does know
+  is not detected.
 - kaectx reads logs from the environment where it runs. A native Windows
   process reads Windows agent logs and `%USERPROFILE%\.kae\kae.db`; a Linux or
   WSL process reads Linux agent logs and `~/.kae/kae.db`. The catalogues are

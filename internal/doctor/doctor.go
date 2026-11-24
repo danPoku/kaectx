@@ -11,6 +11,7 @@ import (
 
 	"github.com/danPoku/kaectx/internal/feedback"
 	"github.com/danPoku/kaectx/internal/governance"
+	"github.com/danPoku/kaectx/internal/ingest"
 )
 
 type Report struct {
@@ -50,7 +51,15 @@ type Report struct {
 	HandoffsSaved    int
 	HandoffsLinked   int
 	HandoffsPickedUp int
+	// UnknownLineTypes lists the log line types the adapters skipped because
+	// they did not recognise them, across all projects, newest first. Like
+	// source errors it is database-wide: a line of an unknown type often
+	// names no session, so it has no honest project.
+	UnknownLineTypes []ingest.UnknownLines
 }
+
+// UnknownLineTypeLimit caps how many unrecognised types the report lists.
+const UnknownLineTypeLimit = 20
 
 // HandoffPickupDays is how long after a handoff is saved a note search still
 // counts as picking it up. A handoff is for the next session, which usually
@@ -191,6 +200,11 @@ func Collect(ctx context.Context, db *sql.DB, projectID int64) (Report, error) {
 		Scan(&r.HandoffsSaved, &r.HandoffsLinked, &r.HandoffsPickedUp); err != nil {
 		return r, fmt.Errorf("read handoff pickup: %w", err)
 	}
+	unknown, err := ingest.ListUnknown(db, 0, "", UnknownLineTypeLimit)
+	if err != nil {
+		return r, fmt.Errorf("read unknown line types: %w", err)
+	}
+	r.UnknownLineTypes = unknown
 	return r, nil
 }
 

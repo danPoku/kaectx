@@ -61,6 +61,9 @@ type Adapter struct {
 	// carry it, but every later line needs it to relativize file paths and
 	// to resolve which git commit was checked out at that moment.
 	cwd string
+	// version is the Codex CLI version from session_meta, kept so a line of
+	// an unrecognised type can be reported with the version that wrote it.
+	version string
 }
 
 func New() *Adapter { return &Adapter{} }
@@ -91,6 +94,7 @@ func (a *Adapter) ParseLine(raw []byte) (ingest.ParseResult, error) {
 		}
 		a.sessionID = p.SessionID
 		a.cwd = p.CWD
+		a.version = p.CliVersion
 		return ingest.ParseResult{Session: ingest.SessionUpdate{
 			NativeID: a.sessionID, CWD: p.CWD, Version: p.CliVersion, Timestamp: l.Timestamp,
 		}}, nil
@@ -119,12 +123,28 @@ func (a *Adapter) ParseLine(raw []byte) (ingest.ParseResult, error) {
 	case "event_msg":
 		return a.parseEventMsg(l, raw)
 
-	default:
-		// world_state (a config/instructions snapshot) and
-		// token_usage_record (pure telemetry), plus any future bookkeeping
-		// type we don't recognize yet: not conversation, nothing to store.
+	case "world_state", "token_usage_record":
+		// A config/instructions snapshot and pure telemetry: known not to
+		// be conversation, nothing to store.
 		return ingest.ParseResult{Skip: true}, nil
+
+	default:
+		// A top-level type this adapter has never seen: reported, so a
+		// format change does not pass as "nothing happened".
+		return a.unknown(l, l.Type), nil
 	}
+}
+
+// unknown builds the result for a line whose type, named name, the adapter
+// does not recognise. See ingest.ParseResult.Unknown. Codex records its
+// version once, on the session_meta line, so the adapter carries it here.
+func (a *Adapter) unknown(l line, name string) ingest.ParseResult {
+	if name == "" {
+		name = "(no type)"
+	}
+	return ingest.ParseResult{Skip: true, Unknown: name, Session: ingest.SessionUpdate{
+		NativeID: a.sessionID, Version: a.version, Timestamp: l.Timestamp,
+	}}
 }
 
 type responseItemPayload struct {
@@ -207,7 +227,15 @@ func (a *Adapter) parseResponseItem(l line, raw []byte) (ingest.ParseResult, err
 		}, nil
 
 	default:
-		return ingest.ParseResult{Skip: true, Session: upd}, nil
+		// A response item of a kind this adapter does not read (a new tool
+		// call shape, say). response_item is Codex's authoritative record
+		// of the conversation, so an unread kind here is content that is
+		// being dropped, and it is reported as "response_item/<kind>".
+		//
+		// event_msg subtypes are deliberately not reported the same way:
+		// they are UI broadcasts that repeat what response_item already
+		// records, so a new one loses nothing.
+		return a.unknown(l, "response_item/"+p.Type), nil
 	}
 }
 
