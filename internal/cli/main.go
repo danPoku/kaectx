@@ -86,6 +86,11 @@ func Main() {
 			fmt.Fprintln(os.Stderr, "kae daemon:", err)
 			os.Exit(1)
 		}
+	case "brief":
+		if err := runBrief(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "kae brief:", err)
+			os.Exit(1)
+		}
 	case "setup":
 		if err := runSetup(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "kae setup:", err)
@@ -116,6 +121,7 @@ commands:
   ingest [--path FILE] [--agent A] [--quiet]   ingest sessions (default: scan Claude Code + Codex session dirs)
   embed [--batch N]                   embed pending chunks via a local Ollama for semantic search
   search <query> [--agent A] [--limit N] [--since D] [--until D] [--risk-aware]   search ingested sessions in this project
+  brief [--budget N]                  print the short summary of this project an agent is given at session start
   feedback <run_id> <rank> <outcome> [--note T]   label a search hit by its run and rank: helpful, unhelpful, stale, incorrect or superseded
   explain <path> [--limit N]          show sessions, actions and git span for a project-relative file
   repair git [--dry-run]              re-derive git commit spans and repo-root file paths for sessions ingested by older versions
