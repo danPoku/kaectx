@@ -83,5 +83,6 @@ func NewWithOptions(db *sql.DB, cwd string, embedClient embed.Embedder, opts Opt
 	s.registerFeedback(srv)
 	s.registerCheckpoint(srv)
 	s.registerBrief(srv)
+	s.registerHandoff(srv)
 	return srv, nil
 }

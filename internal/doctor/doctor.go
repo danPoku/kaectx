@@ -187,16 +187,33 @@ func Collect(ctx context.Context, db *sql.DB, projectID int64) (Report, error) {
 	// after it was saved and no more than HandoffPickupDays later. julianday
 	// does the arithmetic so the comparison does not depend on both
 	// timestamps having the same number of fractional digits.
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*),
-		COALESCE(SUM(co.note_id IS NOT NULL),0),
-		COALESCE(SUM(co.note_id IS NOT NULL AND EXISTS (
+	//
+	// Handoffs come from two places: a checkpoint answered with
+	// saved_handoff (saved when it was answered, and possibly naming no
+	// note), and a note tagged 'handoff' that no checkpoint names, which is
+	// what `kae handoff` writes (saved when the note was created). A note a
+	// checkpoint names is counted once, under the checkpoint.
+	if err := db.QueryRowContext(ctx, `WITH handoffs(note_id, saved_at) AS (
+			SELECT co.note_id, co.resolved_at
+			  FROM checkpoint_observations co
+			 WHERE co.project_id=?2 AND co.outcome='saved_handoff'
+			UNION ALL
+			SELECT n.id, n.created_at
+			  FROM notes n
+			 WHERE n.project_id=?2
+			   AND EXISTS (SELECT 1 FROM json_each(n.tags) t WHERE t.value='handoff')
+			   AND NOT EXISTS (SELECT 1 FROM checkpoint_observations co
+			                    WHERE co.note_id=n.id AND co.outcome='saved_handoff')
+		)
+		SELECT COUNT(*),
+		COALESCE(SUM(note_id IS NOT NULL),0),
+		COALESCE(SUM(note_id IS NOT NULL AND EXISTS (
 			SELECT 1 FROM note_retrievals nr
-			WHERE nr.note_id = co.note_id
-			  AND julianday(nr.created_at) >= julianday(co.resolved_at)
-			  AND julianday(nr.created_at) <= julianday(co.resolved_at) + ?
+			WHERE nr.note_id = handoffs.note_id
+			  AND julianday(nr.created_at) >= julianday(handoffs.saved_at)
+			  AND julianday(nr.created_at) <= julianday(handoffs.saved_at) + ?1
 		)),0)
-		FROM checkpoint_observations co
-		WHERE co.project_id=? AND co.outcome='saved_handoff'`, HandoffPickupDays, projectID).
+		FROM handoffs`, HandoffPickupDays, projectID).
 		Scan(&r.HandoffsSaved, &r.HandoffsLinked, &r.HandoffsPickedUp); err != nil {
 		return r, fmt.Errorf("read handoff pickup: %w", err)
 	}
