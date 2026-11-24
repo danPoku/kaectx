@@ -55,6 +55,9 @@ type Runner interface {
 	LookPath(name string) (string, error)
 	// Run runs name with args and returns its combined output.
 	Run(name string, args ...string) (string, error)
+	// Start starts name with args and returns without waiting for it, for a
+	// long-running process such as the daemon.
+	Start(name string, args ...string) error
 }
 
 // ExecRunner is the Runner that really runs commands.
@@ -65,6 +68,16 @@ func (ExecRunner) LookPath(name string) (string, error) { return exec.LookPath(n
 func (ExecRunner) Run(name string, args ...string) (string, error) {
 	out, err := exec.Command(name, args...).CombinedOutput()
 	return string(out), err
+}
+
+// Start leaves the child's input and output unattached, so it does not hold
+// this process's terminal or pipes open after kae exits.
+func (ExecRunner) Start(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
 }
 
 // legacyBinary matches a command whose last path segment is the old binary

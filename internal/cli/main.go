@@ -86,6 +86,11 @@ func Main() {
 			fmt.Fprintln(os.Stderr, "kae daemon:", err)
 			os.Exit(1)
 		}
+	case "setup":
+		if err := runSetup(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "kae setup:", err)
+			os.Exit(1)
+		}
 	case "migrate-agents":
 		if err := runMigrateAgents(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "kae migrate-agents:", err)
@@ -106,6 +111,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage: kae <command> [flags]
 
 commands:
+  setup [--dry-run] [--yes] [--no-daemon]   connect installed agents, ingest their history, and offer a background service
   init                                create ~/.kae and its database
   ingest [--path FILE] [--agent A]    ingest sessions (default: scan Claude Code + Codex session dirs)
   embed [--batch N]                   embed pending chunks via a local Ollama for semantic search
