@@ -24,6 +24,21 @@ jobs:
       - run: go vet -tags sqlite_fts5 ./...
       - run: go build -tags sqlite_fts5 ./cmd/kae ./cmd/ctx
 
+  # macOS needs no extra toolchain step: the runner image ships Apple's
+  # command-line compiler (clang), which is what cgo uses for the SQLite driver
+  # and the vendored sqlite-vec. macos-latest is Apple Silicon (arm64).
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -count=1 -tags sqlite_fts5 ./...
+      - run: go vet -tags sqlite_fts5 ./...
+      - run: go build -tags sqlite_fts5 ./cmd/kae ./cmd/ctx
+
   windows:
     runs-on: windows-latest
     steps:
