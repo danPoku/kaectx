@@ -115,6 +115,8 @@ tag ships.
 ### Changes that need extra care
 
 - **Schema.** Never edit a migration that has shipped in a tag. Add a new one,
+  raise `store.LatestMigration` to its number (a test fails if you forget;
+  that constant is how kae knows to back the database up before migrating),
   and say in the PR how an existing database is upgraded and whether a
   `kae repair` command is needed afterwards. Test both a fresh `kae init` and
   an upgrade from the previous release's database.

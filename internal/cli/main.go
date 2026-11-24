@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/danPoku/kaectx/internal/datadir"
 	"github.com/danPoku/kaectx/internal/store"
@@ -262,12 +264,34 @@ func openStore() (*sql.DB, store.MigrateResult, error) {
 	if err != nil {
 		return nil, store.MigrateResult{}, err
 	}
+	// A newer binary meeting an older database is about to change its
+	// schema. Copy the database first, so a migration that goes wrong can be
+	// undone by putting the file back. If the copy cannot be made, stop:
+	// migrating anyway would be the unprotected case the backup exists to
+	// remove. KAE_NO_BACKUP=1 is the way past for someone who has decided
+	// that (a full disk, say) and has their own copy.
+	if os.Getenv("KAE_NO_BACKUP") != "1" {
+		path, err := store.BackupIfPending(db, backupsDir(loc), time.Now())
+		if err != nil {
+			db.Close()
+			return nil, store.MigrateResult{}, fmt.Errorf("the database needs a schema update, and backing it up first failed: %w. Free some space or fix the folder; or set KAE_NO_BACKUP=1 to update without a backup", err)
+		}
+		if path != "" {
+			fmt.Fprintf(os.Stderr, "kae: updating the database schema; a backup of it as it was is at %s\n", path)
+		}
+	}
 	result, err := store.Migrate(db)
 	if err != nil {
 		db.Close()
 		return nil, store.MigrateResult{}, err
 	}
 	return db, result, nil
+}
+
+// backupsDir is where pre-migration backups are kept: beside the database,
+// so they move with it and share its permissions.
+func backupsDir(loc datadir.Location) string {
+	return filepath.Join(loc.Dir, "backups")
 }
 
 func runInit() error {
