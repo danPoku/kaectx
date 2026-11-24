@@ -185,3 +185,4 @@ type noClaude struct{}
 
 func (noClaude) LookPath(string) (string, error)       { return "", os.ErrNotExist }
 func (noClaude) Run(string, ...string) (string, error) { return "", os.ErrNotExist }
+func (noClaude) Start(string, ...string) error         { return os.ErrNotExist }

@@ -261,6 +261,22 @@ bad, is welcome.
 ## Quick start
 
 ```
+kae setup                         # connects your agents, ingests their history, offers a background service
+kae search "refresh token race"   # searches the project you are standing in
+```
+
+`kae setup` finds Claude Code and Codex on the machine, registers kae's MCP
+server with each, creates the database, reads the session logs the agents
+have already written, and offers to run the daemon as a background service.
+It asks before the two optional changes (Codex's approval mode, and the
+service), and it is safe to run again: a second run changes nothing and says
+so. `--dry-run` prints every change without making any, `--yes` answers yes
+to the questions, and `--no-daemon` skips the service. See
+[Connecting agents](#connecting-agents) for exactly what it changes.
+
+The same steps by hand:
+
+```
 kae init                          # creates ~/.kae and the database
 kae ingest                        # reads ~/.claude/projects and ~/.codex/sessions
 ollama pull nomic-embed-text      # optional, enables semantic search
@@ -331,7 +347,20 @@ can say "kae is behind" instead of "nothing happened". A lock file
 (`~/.kae/ingest.lock`) keeps several MCP servers from catching up at once. The
 daemon is still the way to keep the index current between sessions.
 
-As a systemd user service:
+`kae setup` installs the daemon as a per-user service when you say yes to its
+question. No administrator rights are needed on any system:
+
+| System | What it installs | To remove it |
+| --- | --- | --- |
+| Linux | systemd user unit `~/.config/systemd/user/kae-daemon.service` | `systemctl --user disable --now kae-daemon.service` |
+| macOS | launchd agent `~/Library/LaunchAgents/io.github.danpoku.kae.daemon.plist`, logging to `~/.kae/daemon.log` | `launchctl bootout gui/$(id -u)/io.github.danpoku.kae.daemon` |
+| Windows | a `kae-daemon` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, started at logon without a window | `reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v kae-daemon /f` |
+
+On Linux without systemd (some WSL setups) setup says so and installs
+nothing; run `kae daemon` yourself. An old `ctx-daemon.service` is stopped
+and removed when the new unit is installed.
+
+The systemd unit, if you would rather write it by hand:
 
 ```
 # ~/.config/systemd/user/kae-daemon.service
@@ -382,7 +411,21 @@ path, so the same repository is recognised as one project on each machine.
 `kae mcp` speaks MCP over stdio. The agent starts it, and the server treats the
 directory it was started in as the project.
 
-Claude Code:
+`kae setup` does the following for each agent it finds. It registers the full
+path of the `kae` binary, because an agent's `PATH` is often not your shell's.
+
+- **Claude Code** (found by `~/.claude`): runs
+  `claude mcp add --scope user kae -- <path to kae> mcp`. kae never edits
+  `~/.claude.json` itself. If the `claude` command is not on `PATH`, setup
+  prints the command for you to run.
+- **Codex** (found by `~/.codex`): appends a `[mcp_servers.kae]` table to
+  `~/.codex/config.toml`, leaving every other line as it was and keeping a
+  copy as `config.toml.kae-backup`. It asks before adding
+  `default_tools_approval_mode = "approve"`.
+- An older `ctx` registration in either is replaced, as
+  `kae migrate-agents` does.
+
+By hand, Claude Code:
 
 ```
 claude mcp add --scope user kae -- kae mcp
@@ -507,6 +550,7 @@ first_seq and last_seq rather than paging from the start.
 
 | Command | |
 | --- | --- |
+| `kae setup [--dry-run] [--yes] [--no-daemon]` | Connect installed agents, ingest their existing history, and offer to run the daemon as a background service. Safe to repeat. |
 | `kae init` | Create `~/.kae` and the database. Other commands do this too if needed. |
 | `kae ingest [--path FILE] [--agent A]` | One-shot ingest of the default directories, or of a single file. |
 | `kae embed [--batch N]` | Embed pending chunks through Ollama. |
@@ -659,6 +703,7 @@ cmd/ctx/             the deprecated ctx alias, the same code with a notice
 internal/cli/        the command line both binaries run
 internal/datadir/    where the data folder is, and the move from ~/.ctx
 internal/agentcfg/   reading and changing agents' MCP registrations
+internal/service/    installing the daemon as a per-user background service
 internal/store/      database open, migrations, project resolution and merge
 internal/ingest/     the ingest loop and chunker, plus claudecode/ and codex/ adapters
 internal/redact/     secret redaction

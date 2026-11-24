@@ -52,6 +52,11 @@ func (f *fakeClaude) LookPath(name string) (string, error) {
 	return "/usr/bin/" + name, nil
 }
 
+func (f *fakeClaude) Start(name string, args ...string) error {
+	f.calls = append(f.calls, append([]string{name}, args...))
+	return nil
+}
+
 func (f *fakeClaude) Run(name string, args ...string) (string, error) {
 	f.calls = append(f.calls, append([]string{name}, args...))
 	path := ClaudeConfigPath(f.home)
