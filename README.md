@@ -274,6 +274,29 @@ so. `--dry-run` prints every change without making any, `--yes` answers yes
 to the questions, and `--no-daemon` skips the service. See
 [Connecting agents](#connecting-agents) for exactly what it changes.
 
+The first ingest into an empty database, from `kae setup` or `kae ingest`,
+ends with a summary of what kae found, because that history existed before
+you installed it:
+
+```
+kae found 412 sessions across 9 projects, from 2026-02-03 to 2026-11-23.
+This history was already on your disk: kae read the logs your agents had written.
+
+By agent:
+  claude-code  301 sessions
+  codex        111 sessions
+
+Secrets redacted before storing: 57
+
+Try:
+
+  kae search "refresh token race"
+```
+
+The suggested search is built from the title of the most recent session in the
+project you are standing in, and is only shown with the result it returns.
+Later ingests print one line. `kae ingest --quiet` leaves the summary out.
+
 The same steps by hand:
 
 ```
@@ -552,7 +575,7 @@ first_seq and last_seq rather than paging from the start.
 | --- | --- |
 | `kae setup [--dry-run] [--yes] [--no-daemon]` | Connect installed agents, ingest their existing history, and offer to run the daemon as a background service. Safe to repeat. |
 | `kae init` | Create `~/.kae` and the database. Other commands do this too if needed. |
-| `kae ingest [--path FILE] [--agent A]` | One-shot ingest of the default directories, or of a single file. |
+| `kae ingest [--path FILE] [--agent A] [--quiet]` | One-shot ingest of the default directories, or of a single file. The first ingest into an empty database prints a summary of what was found; `--quiet` suppresses it. |
 | `kae embed [--batch N]` | Embed pending chunks through Ollama. |
 | `kae search <query> [--agent A] [--limit N] [--since D] [--until D] [--risk-aware] [--all-projects]` | Search the current project, or every project with `--all-projects`. `--risk-aware` reranks using recorded retrieval outcomes. Output starts with the search's run ID and numbers each hit. |
 | `kae feedback <run_id> <rank> <outcome> [--note TEXT]` | Label a `kae search` hit as helpful, unhelpful, stale, incorrect or superseded, the CLI counterpart of `record_retrieval_outcome`. A second label for the same hit replaces the first. |

@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/danPoku/kaectx/internal/agentcfg"
+	"github.com/danPoku/kaectx/internal/firstrun"
 	"github.com/danPoku/kaectx/internal/ingest"
 	"github.com/danPoku/kaectx/internal/service"
 )
@@ -230,6 +231,10 @@ func firstIngest() (string, error) {
 	}
 	defer release()
 
+	before, err := firstrun.CountSessions(db)
+	if err != nil {
+		return "", err
+	}
 	ok, failed := 0, 0
 	for _, src := range agentSources {
 		results, err := ingest.RunAll(db, src.newAdapter, src.root(home))
@@ -244,7 +249,16 @@ func firstIngest() (string, error) {
 			ok++
 		}
 	}
-	return fmt.Sprintf("ingested %d session log file(s), %d failed", ok, failed), nil
+	line := fmt.Sprintf("ingested %d session log file(s), %d failed", ok, failed)
+	// The same report `kae ingest` gives when it fills an empty database.
+	// For most people setup is that first ingest, so this is where they
+	// learn what kae already knows.
+	if before == 0 {
+		if summary, err := firstRunSummary(db); err == nil && summary != "" {
+			line += "\n\n" + summary
+		}
+	}
+	return line, nil
 }
 
 // selfCommand is the path agents and the service should use to start kae.
