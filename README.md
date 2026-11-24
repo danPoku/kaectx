@@ -9,7 +9,7 @@
 [![Release](https://img.shields.io/github/v/release/danPoku/kaectx?label=release&color=2ea44f)](https://github.com/danPoku/kaectx/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/danPoku/kaectx/test.yml?branch=master&label=CI)](https://github.com/danPoku/kaectx/actions/workflows/test.yml)
 [![Go](https://img.shields.io/github/go-mod/go-version/danPoku/kaectx?logo=go&logoColor=white)](go.mod)
-[![MCP](https://img.shields.io/badge/MCP-14%20tools-6f42c1)](#tools)
+[![MCP](https://img.shields.io/badge/MCP-15%20tools-6f42c1)](#tools)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20WSL2%20%7C%20macOS%20%7C%20Windows-0969da)](#install)
 [![License](https://img.shields.io/github/license/danPoku/kaectx?color=yellow)](LICENSE)
 
@@ -517,6 +517,32 @@ To remove it, delete that hook entry or that block. A handoff delivered in a
 brief, by the hook or by `get_brief`, counts as picked up in `kae doctor`;
 `kae brief` typed by hand does not.
 
+### Handing work from one session or agent to another
+
+```
+kae handoff      # in the repo, after a session: writes a handoff note and prints it
+kae resume       # in the same repo, from any agent or terminal: prints the newest handoff
+```
+
+`kae handoff` takes the project's most recent session (or `--session ID`) and
+assembles a note from what is already stored: the first prompt as the
+objective, the last three exchanges, the files the session changed, its branch
+and commit span, and the `get_session` call that opens the full record. It
+quotes and lists; no model writes or summarises anything. The note is saved
+tagged `handoff`, linked to its session. Handing the same session off again
+replaces the earlier note.
+
+`kae resume` prints the newest handoff for the project, whoever wrote it: a
+`kae handoff` note, or one an agent saved with `save_note` at a checkpoint.
+It is per project, not per agent, so a handoff written after a Claude Code
+session is what Codex sees. Agents get the same through the `get_handoff`
+tool, and the newest handoff is also the first item in the
+[session-start brief](#the-session-start-brief). `kae resume` and
+`get_handoff` each count as the handoff being picked up in `kae doctor`.
+
+Neither command starts the other agent; they move the context, and you start
+the session.
+
 ### Tools
 
 | Tool | What it does |
@@ -532,6 +558,7 @@ brief, by the hook or by `get_brief`, counts as picked up in `kae doctor`;
 | `record_retrieval_outcome` | Labels retrieved evidence as helpful, unhelpful, stale, incorrect or superseded. Pass the exact search run ID and rank returned by `search_context` or `get_chunk`. A label on a hit from another project counts toward that project's evidence, not the caller's. |
 | `record_search_outcome` | Records whether a search as a whole answered the question (helpful, partial or unhelpful) and, when it fell short, why (`wrong_project`, `not_indexed`, `stale_state`, `ranking`). Pass the search's run ID. Meant for every search: one answered by its snippets alone, with nothing opened, is `helpful`. Never changes a result's reliability; a second call for the same search replaces the first. |
 | `get_brief` | Returns the session-start brief for this project: the latest handoff note, recent sessions with the files they changed, and the files changed most in the past week, within a token `budget` (default 600). `text` is empty for a project with no history. Meant to be called once at the start of a session by an agent that was not given the brief by a hook. A handoff it includes is named in `handoff_note_id` and recorded as picked up. |
+| `get_handoff` | Returns the newest handoff note for this project, whichever agent or command wrote it, as `text`, with `session_id`, `anchor_seq` and a `next_step` that opens the conversation it came from. `found` is false when none has been saved. For "continue where we left off". Reading it is recorded as the handoff being picked up. |
 | `checkpoint_status` | Assesses the latest session's message count, active time and file breadth. Active time (`duration_minutes`) is the sum of the gaps between consecutive messages, leaving out gaps over 30 minutes, so a session resumed days later is not days long. When a threshold is reached the level is `checkpoint_recommended`, and `checkpoint_strongly_recommended` only once an urgent threshold is crossed; the agent is instructed to offer a durable handoff and a fresh session, and kae never switches or ends the session automatically. Every check is stored, healthy ones included, one row per session. Pass `session_id` to assess a specific session. `pending_feedback` lists up to 10 opened results still waiting for an outcome, and `pending_searches` up to 10 searches served by this `kae mcp` process that have no whole-search outcome yet. |
 | `feedback_status` | Returns a bounded inbox of checkpoint decisions and opened retrievals that still need an explicit outcome. It identifies missing feedback; it does not guess whether context was helpful. `pending_searches` lists this `kae mcp` process's own searches with no whole-search outcome yet, under the same limit; another agent's searches are never listed. |
 | `record_checkpoint_outcome` | Records whether the user started a new session, saved a handoff, continued, or dismissed a checkpoint recommendation. After a healthy check only `continued` can be recorded. With `saved_handoff`, pass `note_id` (the ID `save_note` returned for the handoff, a note in this project) so `kae doctor` can report whether a later note search returned it. |
@@ -629,12 +656,14 @@ first_seq and last_seq rather than paging from the start.
 | `kae search <query> [--agent A] [--limit N] [--since D] [--until D] [--risk-aware] [--all-projects]` | Search the current project, or every project with `--all-projects`. `--risk-aware` reranks using recorded retrieval outcomes. Output starts with the search's run ID and numbers each hit. |
 | `kae feedback <run_id> <rank> <outcome> [--note TEXT]` | Label a `kae search` hit as helpful, unhelpful, stale, incorrect or superseded, the CLI counterpart of `record_retrieval_outcome`. A second label for the same hit replaces the first. |
 | `kae brief [--budget N] [--hook]` | Print the session-start brief for the current project. `--hook` is for an agent's session-start hook: it records the delivery, and never fails or prints an error. |
+| `kae handoff [--session ID]` | Write a handoff note for the project's latest session (or the one named), from stored data only, and print it. Replaces an earlier `kae handoff` note for the same session. |
+| `kae resume` | Print the project's newest handoff note, whoever wrote it, and record it as picked up. |
 | `kae explain <path> [--limit N]` | Show sessions, actions and git span for a project-relative file. |
 | `kae repair git\|touches\|messages\|projects\|notes [--dry-run]` | Bring data ingested by older versions up to date (see [Quick start](#quick-start)). |
 | `kae project list` | Show projects, their remotes, session counts and known paths. |
 | `kae project merge <from> <into>` | Fold one project into another. |
 | `kae audit-secrets` | Re-scan stored text with the current redaction rules and report rows and rule names (never the matched text). Exits non-zero on findings. Changes nothing. |
-| `kae doctor` | Report the current project's sessions, embedding backlog, retrievals, outcomes, search outcomes, checkpoint checks (by level and by what the user did next) and handoff pickup (handoffs saved, and how many a note search returned within 7 days), plus database-wide source, ingest-error and unassigned-chunk counts, and the log line types the adapters skipped without recognising (agent, version, type, count, first and last seen). |
+| `kae doctor` | Report the current project's sessions, embedding backlog, retrievals, outcomes, search outcomes, checkpoint checks (by level and by what the user did next) and handoff pickup (handoffs saved at a checkpoint or with `kae handoff`, and how many were read within 7 days through a note search, the brief, `kae resume` or `get_handoff`), plus database-wide source, ingest-error and unassigned-chunk counts, and the log line types the adapters skipped without recognising (agent, version, type, count, first and last seen). |
 | `kae mcp` | Serve MCP over stdio. Catches up on unread session logs in the background. |
 | `kae daemon` | Ingest and embed continuously. |
 | `kae version` | Print the version of this binary. |
