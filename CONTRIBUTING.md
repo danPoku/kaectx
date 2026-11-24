@@ -150,6 +150,13 @@ A **patch** bump (`0.2.0` → `0.2.1`) is fixes only.
    and attaches the archives and `SHA256SUMS` to the GitHub release, creating
    the release with generated notes if it does not exist yet.
 
+   The same run then updates the package managers. It writes a Homebrew
+   formula, a Scoop manifest and winget manifests with
+   `scripts/pkgmanifests`, pushes the first two to `danPoku/homebrew-tap`, and
+   opens a pull request to `microsoft/winget-pkgs`. A pre-release tag
+   (`v1.0.0-rc1`) skips this. See
+   [Package manager setup](#package-manager-setup) for what it needs.
+
 4. Replace the generated notes with ones written for someone upgrading from
    the previous version: upgrade steps first, then what changed. Check the
    release has five archives and `SHA256SUMS`.
@@ -160,6 +167,25 @@ A **patch** bump (`0.2.0` → `0.2.1`) is fixes only.
 
 5. After the tag, set the MCP server version back to `X.Y.Z+dev` in a
    follow-up PR, so builds from `master` don't claim to be the release.
+
+### Package manager setup
+
+Done once. Until it is, the release workflow warns and skips these steps; the
+release itself is not affected.
+
+- **Homebrew and Scoop.** Create the public repository `danPoku/homebrew-tap`
+  (Homebrew requires the `homebrew-` prefix; Scoop accepts any repository with
+  a `bucket/` folder, so one serves both). Add a repository secret
+  `TAP_GITHUB_TOKEN` here: a fine-grained token with read and write access to
+  that repository's contents only.
+- **winget.** Fork `microsoft/winget-pkgs` to the account that will open the
+  pull requests, and add a secret `WINGET_GITHUB_TOKEN`: a classic token with
+  the `public_repo` scope. The first submission of `danPoku.kae` is reviewed
+  as a new package and may need a reply on the pull request.
+
+The generated manifests are attached to every release run as the
+`package-manifests` artifact, including runs on pull requests, so they can be
+read before any token exists.
 
 A tag is permanent: the Go module proxy caches each version the first time
 anyone asks for it. If a release is broken, fix it on `master` and tag the next
