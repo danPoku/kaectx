@@ -141,8 +141,12 @@ jobs:
           run "$bin/kae" ingest --path "$fixture"
           out="$(run "$bin/kae" search --all-projects "sqlite WAL")"
           echo "$out"
-          echo "$out" | grep -q "claude-code"
-          run "$bin/ctx" version 2>&1 | grep -q "now called kae"
+          # Matched with `case`, not `| grep -q`: grep -q exits at the first
+          # match, and under pipefail the writer's broken pipe then fails
+          # the step now and again.
+          case "$out" in *claude-code*) ;; *) echo "search found nothing" >&2; exit 1 ;; esac
+          alias_out="$(run "$bin/ctx" version 2>&1)"
+          case "$alias_out" in *"now called kae"*) ;; *) echo "ctx alias printed no deprecation notice" >&2; exit 1 ;; esac
 
       # Archive names carry no version, so that
       # .../releases/latest/download/kae_linux_amd64.tar.gz always works and
