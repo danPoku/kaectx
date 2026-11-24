@@ -87,6 +87,13 @@ func CheckFreshness(db *sql.DB, roots []Root, now time.Time) (Freshness, error) 
 	cutoff := now.Add(-FreshnessQuiet)
 	var oldest time.Time
 	for _, root := range roots {
+		// Only asked which files and folders count; never parses. Without
+		// this an agent's other .jsonl files would be reported as unread
+		// sessions for ever, since ingest never reads them.
+		var probe Adapter
+		if root.NewAdapter != nil {
+			probe = root.NewAdapter()
+		}
 		err := filepath.WalkDir(root.Dir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				// A directory that vanished mid-walk, or one we can't read:
@@ -100,7 +107,13 @@ func CheckFreshness(db *sql.DB, roots []Root, now time.Time) (Freshness, error) 
 				}
 				return nil
 			}
-			if d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+			if d.IsDir() {
+				if path != root.Dir && probe != nil && SkipsDir(probe, path) {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".jsonl") || (probe != nil && !IsSessionLog(probe, path)) {
 				return nil
 			}
 			info, err := d.Info()

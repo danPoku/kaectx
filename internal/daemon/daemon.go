@@ -33,6 +33,16 @@ type Source struct {
 	NewAdapter func() ingest.Adapter
 }
 
+// probe returns an adapter used only to ask which files and folders count
+// for this source (ingest.IsSessionLog, ingest.SkipsDir), or nil when the
+// source has no adapter factory.
+func (s Source) probe() ingest.Adapter {
+	if s.NewAdapter == nil {
+		return nil
+	}
+	return s.NewAdapter()
+}
+
 // Run performs an initial catch-up ingest across every source, then blocks,
 // watching each source's directory tree for live changes and incrementally
 // re-ingesting touched files. A periodic fallback re-scan (every
@@ -65,7 +75,7 @@ func Run(ctx context.Context, db *sql.DB, sources []Source, fallbackInterval, de
 	// watch already up, such a write raises an event; if the scan also saw
 	// it, ingest's byte offsets make the second read a no-op.
 	for _, src := range sources {
-		addWatchesRecursive(watcher, src.Root)
+		addWatchesRecursive(watcher, src, src.Root)
 	}
 	for _, src := range sources {
 		runAllLogged(db, src)
@@ -109,7 +119,7 @@ func Run(ctx context.Context, db *sql.DB, sources []Source, fallbackInterval, de
 				// last tick (or since startup) is how a source that didn't
 				// exist yet gets picked up — Add is harmless to repeat on
 				// an already-watched path.
-				addWatchesRecursive(watcher, src.Root)
+				addWatchesRecursive(watcher, src, src.Root)
 			}
 			// The periodic rescan is also when notes shared through a
 			// repository are picked up: a `git pull` writes no agent log,
@@ -138,12 +148,21 @@ func runAllLogged(db *sql.DB, src Source) {
 // it. A root that doesn't exist yet is silently skipped — not an error,
 // since the daemon may start before an agent has ever been used; the
 // periodic fallback tick retries this until the directory appears.
-func addWatchesRecursive(watcher *fsnotify.Watcher, root string) {
+//
+// Folders the source's adapter says can hold no session logs are left
+// unwatched. Antigravity makes a folder for every tool call's output, so one
+// long conversation would otherwise cost hundreds of watches, and Linux caps
+// how many a user may hold.
+func addWatchesRecursive(watcher *fsnotify.Watcher, src Source, root string) {
+	probe := src.probe()
 	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // missing root/subdir: nothing to watch yet, not fatal
 		}
 		if d.IsDir() {
+			if path != src.Root && probe != nil && ingest.SkipsDir(probe, path) {
+				return fs.SkipDir
+			}
 			if err := watcher.Add(path); err != nil {
 				log.Printf("kae daemon: watch %s: %v", path, err)
 			}
@@ -164,8 +183,8 @@ func addWatchesRecursive(watcher *fsnotify.Watcher, root string) {
 func handleEvent(db *sql.DB, sources []Source, watcher *fsnotify.Watcher, debounce *debouncer, event fsnotify.Event) {
 	if event.Has(fsnotify.Create) {
 		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-			addWatchesRecursive(watcher, event.Name)
 			if src, ok := sourceFor(sources, event.Name); ok {
+				addWatchesRecursive(watcher, src, event.Name)
 				runAllLogged(db, Source{Agent: src.Agent, Root: event.Name, NewAdapter: src.NewAdapter})
 			}
 			return
@@ -176,6 +195,13 @@ func handleEvent(db *sql.DB, sources []Source, watcher *fsnotify.Watcher, deboun
 	}
 	if !strings.HasSuffix(event.Name, ".jsonl") {
 		return
+	}
+	// An agent can keep other .jsonl files beside its transcripts; only a
+	// session log is worth an ingest.
+	if src, ok := sourceFor(sources, event.Name); ok {
+		if probe := src.probe(); probe != nil && !ingest.IsSessionLog(probe, event.Name) {
+			return
+		}
 	}
 	debounce.schedule(event.Name)
 }
