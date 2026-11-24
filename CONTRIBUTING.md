@@ -88,7 +88,7 @@ user; the body says why, and what the reader would otherwise have to rediscover.
 ## Pull requests
 
 Target `master`. CI (`.github/workflows/test.yml`) runs the test, vet and build
-gate on Linux and on native Windows; both must pass before merging.
+gate on Linux, macOS and native Windows; all three must pass before merging.
 
 Merge with an ordinary **merge commit**. Squashing throws away the
 `feat:`/`fix:` commits that release notes are written from, and rebasing
