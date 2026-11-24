@@ -1,0 +1,1283 @@
+{
+  "contract_version": "0.1",
+  "tools": [
+    {
+      "name": "checkpoint_status",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "additionalProperties": false,
+            "properties": {
+              "catching_up": {
+                "type": "boolean"
+              },
+              "last_ingest_at": {
+                "type": "string"
+              },
+              "oldest_pending_at": {
+                "type": "string"
+              },
+              "pending_files": {
+                "type": "integer"
+              },
+              "warning": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "pending_files"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "level": {
+            "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": false,
+            "properties": {
+              "duration_minutes": {
+                "type": "integer"
+              },
+              "files_changed": {
+                "type": "integer"
+              },
+              "messages": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "messages",
+              "files_changed",
+              "duration_minutes"
+            ],
+            "type": "object"
+          },
+          "pending_feedback": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "confidence": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "string"
+                },
+                "query": {
+                  "type": "string"
+                },
+                "rank": {
+                  "type": "integer"
+                },
+                "run_id": {
+                  "type": "string"
+                },
+                "session_id": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "source",
+                "confidence",
+                "prompt"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "pending_searches": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "next_step": {
+                  "type": "string"
+                },
+                "query": {
+                  "type": "string"
+                },
+                "run_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "run_id",
+                "query",
+                "next_step"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "should_signal": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "session_id",
+          "level",
+          "should_signal",
+          "recommendation",
+          "reasons",
+          "metrics",
+          "pending_feedback",
+          "pending_searches"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "explain_file",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sessions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "agent": {
+                  "type": "string"
+                },
+                "changes": {
+                  "type": "integer"
+                },
+                "chunk_id": {
+                  "type": [
+                    "null",
+                    "integer"
+                  ]
+                },
+                "commit_approximate": {
+                  "type": "boolean"
+                },
+                "commit_source": {
+                  "type": "string"
+                },
+                "ending_commit": {
+                  "type": "string"
+                },
+                "git_branch": {
+                  "type": "string"
+                },
+                "last_touch_at": {
+                  "type": "string"
+                },
+                "preview": {
+                  "type": "string"
+                },
+                "session_id": {
+                  "type": "string"
+                },
+                "started_at": {
+                  "type": "string"
+                },
+                "starting_commit": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "touches": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "session_id",
+                "agent",
+                "started_at",
+                "actions",
+                "touches",
+                "changes"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "sessions"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "feedback_status",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "nudges": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "confidence": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "string"
+                },
+                "query": {
+                  "type": "string"
+                },
+                "rank": {
+                  "type": "integer"
+                },
+                "run_id": {
+                  "type": "string"
+                },
+                "session_id": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "source",
+                "confidence",
+                "prompt"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "pending": {
+            "type": "integer"
+          },
+          "pending_searches": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "next_step": {
+                  "type": "string"
+                },
+                "query": {
+                  "type": "string"
+                },
+                "run_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "run_id",
+                "query",
+                "next_step"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "pending",
+          "nudges",
+          "pending_searches"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_brief",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "budget": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "budget": {
+            "type": "integer"
+          },
+          "handoff_note_id": {
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "text",
+          "tokens",
+          "budget"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_chunk",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "chunk_id": {
+            "type": "integer"
+          },
+          "rank": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunk_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "chunk_id": {
+            "type": "integer"
+          },
+          "feedback_target": {
+            "additionalProperties": false,
+            "properties": {
+              "rank": {
+                "type": "integer"
+              },
+              "run_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "run_id",
+              "rank"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "first_seq": {
+            "type": "integer"
+          },
+          "last_seq": {
+            "type": "integer"
+          },
+          "next_step": {
+            "type": "string"
+          },
+          "open_inferred": {
+            "type": "boolean"
+          },
+          "open_recorded": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "text_truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "chunk_id",
+          "session_id",
+          "agent",
+          "at",
+          "first_seq",
+          "last_seq",
+          "text",
+          "open_recorded"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_handoff",
+      "input": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "anchor_seq": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "found": {
+            "type": "boolean"
+          },
+          "next_step": {
+            "type": "string"
+          },
+          "note_id": {
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "found"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_session",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "from_seq": {
+            "type": "integer"
+          },
+          "include_tools": {
+            "type": "boolean"
+          },
+          "max_chars": {
+            "type": "integer"
+          },
+          "rank": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "to_seq": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "feedback_target": {
+            "additionalProperties": false,
+            "properties": {
+              "rank": {
+                "type": "integer"
+              },
+              "run_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "run_id",
+              "rank"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "content_truncated": {
+                  "type": "boolean"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "full_chars": {
+                  "type": "integer"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "seq": {
+                  "type": "integer"
+                },
+                "tool_name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "seq",
+                "role",
+                "kind",
+                "content"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_from_seq": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "next_step": {
+            "type": "string"
+          },
+          "open_recorded": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "messages",
+          "truncated",
+          "open_recorded"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "recent_sessions",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "since": {
+            "type": "string"
+          },
+          "until": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "additionalProperties": false,
+            "properties": {
+              "catching_up": {
+                "type": "boolean"
+              },
+              "last_ingest_at": {
+                "type": "string"
+              },
+              "oldest_pending_at": {
+                "type": "string"
+              },
+              "pending_files": {
+                "type": "integer"
+              },
+              "warning": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "pending_files"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "sessions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "agent": {
+                  "type": "string"
+                },
+                "ended_at": {
+                  "type": "string"
+                },
+                "files_changed": {
+                  "type": "integer"
+                },
+                "git_branch": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message_count": {
+                  "type": "integer"
+                },
+                "parent_session_id": {
+                  "type": "string"
+                },
+                "started_at": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "agent",
+                "started_at",
+                "message_count",
+                "files_changed"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_checkpoint_outcome",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "note_id": {
+            "type": "integer"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "note_id": {
+            "type": "integer"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "recorded": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "recorded",
+          "session_id",
+          "outcome"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_retrieval_outcome",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "rank": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "rank",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_error": {
+            "type": "string"
+          },
+          "evidence_key": {
+            "type": "string"
+          },
+          "neutral": {
+            "type": "boolean"
+          },
+          "observations": {
+            "type": "integer"
+          },
+          "recorded": {
+            "type": "boolean"
+          },
+          "reliability": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "recorded",
+          "evidence_key",
+          "observations",
+          "reliability",
+          "neutral"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_search_outcome",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "recorded": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "recorded",
+          "run_id",
+          "outcome"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "save_note",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "supersedes": {
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "superseded": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_context",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "risk_aware": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string"
+          },
+          "until": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "governance_applied": {
+            "type": "boolean"
+          },
+          "index": {
+            "additionalProperties": false,
+            "properties": {
+              "catching_up": {
+                "type": "boolean"
+              },
+              "last_ingest_at": {
+                "type": "string"
+              },
+              "oldest_pending_at": {
+                "type": "string"
+              },
+              "pending_files": {
+                "type": "integer"
+              },
+              "warning": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "pending_files"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "outcome_next_step": {
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "agent": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string"
+                },
+                "chunk_id": {
+                  "type": "integer"
+                },
+                "first_seq": {
+                  "type": "integer"
+                },
+                "governance_neutral": {
+                  "type": "boolean"
+                },
+                "last_seq": {
+                  "type": "integer"
+                },
+                "next_step": {
+                  "type": "string"
+                },
+                "original_rank": {
+                  "type": "integer"
+                },
+                "policy_score": {
+                  "type": "number"
+                },
+                "project": {
+                  "type": "string"
+                },
+                "rank": {
+                  "type": "integer"
+                },
+                "reliability": {
+                  "type": "number"
+                },
+                "session_id": {
+                  "type": "string"
+                },
+                "snippet": {
+                  "type": "string"
+                },
+                "started_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "rank",
+                "chunk_id",
+                "session_id",
+                "agent",
+                "started_at",
+                "at",
+                "snippet",
+                "first_seq",
+                "last_seq",
+                "next_step"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "retrieval_run_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "telemetry_recorded": {
+            "type": "boolean"
+          },
+          "used_semantic_search": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "results",
+          "telemetry_recorded",
+          "used_semantic_search",
+          "governance_applied"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_notes",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "notes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "agent": {
+                  "type": "string"
+                },
+                "anchor_seq": {
+                  "type": [
+                    "null",
+                    "integer"
+                  ]
+                },
+                "body": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "integer"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "next_step": {
+                  "type": "string"
+                },
+                "session_id": {
+                  "type": "string"
+                },
+                "tags": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "kind",
+                "title",
+                "body",
+                "created_at"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "notes"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "sessions_touching",
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "agent": {
+                  "type": "string"
+                },
+                "session_id": {
+                  "type": "string"
+                },
+                "started_at": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "touches": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "session_id",
+                "agent",
+                "started_at",
+                "actions",
+                "touches"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "type": "object"
+      }
+    }
+  ]
+}

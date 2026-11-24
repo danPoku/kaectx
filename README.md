@@ -53,8 +53,10 @@ retrieval outcome tracking, opt-in risk-aware search, checkpoint and feedback
 signals, `kae doctor` and `kae audit-secrets`. Linux (including Ubuntu under WSL2) is the
 primary environment; native Windows and macOS are also supported and tested. Expect
 breaking changes in the 0.x series, including to the database schema and the
-MCP tool output. See
-[Limitations](#limitations) before relying on it.
+MCP tool output. The tool output is versioned (see
+[Tools](#tools)), the database is backed up before each schema update, and
+[CONTRIBUTING.md](CONTRIBUTING.md#what-10-requires) lists what 1.0 requires.
+See [Limitations](#limitations) before relying on it.
 
 Articles written before v0.2.0 describe the v0.1.3 feature set. They are still
 useful as snapshots of the original local-search release; pin `@v0.1.3` if you
@@ -562,6 +564,15 @@ the session.
 | `checkpoint_status` | Assesses the latest session's message count, active time and file breadth. Active time (`duration_minutes`) is the sum of the gaps between consecutive messages, leaving out gaps over 30 minutes, so a session resumed days later is not days long. When a threshold is reached the level is `checkpoint_recommended`, and `checkpoint_strongly_recommended` only once an urgent threshold is crossed; the agent is instructed to offer a durable handoff and a fresh session, and kae never switches or ends the session automatically. Every check is stored, healthy ones included, one row per session. Pass `session_id` to assess a specific session. `pending_feedback` lists up to 10 opened results still waiting for an outcome, and `pending_searches` up to 10 searches served by this `kae mcp` process that have no whole-search outcome yet. |
 | `feedback_status` | Returns a bounded inbox of checkpoint decisions and opened retrievals that still need an explicit outcome. It identifies missing feedback; it does not guess whether context was helpful. `pending_searches` lists this `kae mcp` process's own searches with no whole-search outcome yet, under the same limit; another agent's searches are never listed. |
 | `record_checkpoint_outcome` | Records whether the user started a new session, saved a handoff, continued, or dismissed a checkpoint recommendation. After a healthy check only `continued` can be recorded. With `saved_handoff`, pass `note_id` (the ID `save_note` returned for the handoff, a note in this project) so `kae doctor` can report whether a later note search returned it. |
+
+The names of these tools, their arguments and the fields of their results
+form a versioned contract. Its version, currently **0.1**, is in the server's
+instructions (`Tool contract version: 0.1.`) and in `kae doctor` as
+`contract_version`. Additions raise the minor number. Nothing is removed or
+renamed without a major bump and at least one release in which the old form
+still works and is marked deprecated. A test compares the running server with
+the recorded shape, so a change cannot ship without the version changing.
+The rules are in [CONTRIBUTING.md](CONTRIBUTING.md#the-mcp-contract).
 
 Search returns snippets on purpose. An agent that wants the full exchange calls
 `get_chunk` with the hit's `chunk_id`, or `get_session` with the session id and

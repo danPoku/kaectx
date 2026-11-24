@@ -13,6 +13,7 @@ import (
 	"github.com/danPoku/kaectx/internal/doctor"
 	"github.com/danPoku/kaectx/internal/feedback"
 	"github.com/danPoku/kaectx/internal/ingest"
+	"github.com/danPoku/kaectx/internal/mcpserver"
 	"github.com/danPoku/kaectx/internal/store"
 )
 
@@ -50,7 +51,16 @@ func runDoctor(args []string) error {
 		}
 		fmt.Print(formatBackups(backups))
 	}
+	fmt.Print(formatContract())
 	return nil
+}
+
+// formatContract states the version of the MCP tool contract this binary
+// serves, so a person debugging an agent prompt can see which shape of tool
+// output the agent is getting. Agents are told the same version in the
+// server's instructions.
+func formatContract() string {
+	return fmt.Sprintf("\nmcp tools\n  contract_version: %s (names, arguments and result fields; see CONTRIBUTING.md)\n", mcpserver.ContractVersion)
 }
 
 // formatBackups lists the copies of the database taken before schema
