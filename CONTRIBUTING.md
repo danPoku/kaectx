@@ -89,6 +89,9 @@ user; the body says why, and what the reader would otherwise have to rediscover.
 
 Target `master`. CI (`.github/workflows/test.yml`) runs the test, vet and build
 gate on Linux, macOS and native Windows; all three must pass before merging.
+A PR that touches `.github/workflows/release.yml`, `install.sh` or
+`install.ps1` also runs the release build without publishing, so the release
+path is tested before a tag depends on it.
 
 Merge with an ordinary **merge commit**. Squashing throws away the
 `feat:`/`fix:` commits that release notes are written from, and rebasing
@@ -141,11 +144,18 @@ A **patch** bump (`0.2.0` → `0.2.1`) is fixes only.
    git push origin vX.Y.Z
    ```
 
-4. Publish the GitHub release from the tag, with notes written for someone
-   upgrading from the previous version: upgrade steps first, then what changed.
+   Pushing the tag starts `.github/workflows/release.yml`. It builds the five
+   archives (Linux and macOS on x86-64 and arm64, Windows on x86-64), runs
+   each binary on its own platform, checks both install scripts against them,
+   and attaches the archives and `SHA256SUMS` to the GitHub release, creating
+   the release with generated notes if it does not exist yet.
+
+4. Replace the generated notes with ones written for someone upgrading from
+   the previous version: upgrade steps first, then what changed. Check the
+   release has five archives and `SHA256SUMS`.
 
    ```
-   gh release create vX.Y.Z --title vX.Y.Z --notes-file notes.md
+   gh release edit vX.Y.Z --notes-file notes.md
    ```
 
 5. After the tag, set the MCP server version back to `X.Y.Z+dev` in a

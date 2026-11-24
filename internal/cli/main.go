@@ -91,6 +91,8 @@ func Main() {
 			fmt.Fprintln(os.Stderr, "kae migrate-agents:", err)
 			os.Exit(1)
 		}
+	case "version", "--version":
+		fmt.Println(versionString())
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -120,7 +122,8 @@ commands:
   doctor                              report ingestion, embedding, retrieval, and outcome health
   mcp                                 serve kae's tools over MCP (stdio) for an agent to call
   daemon [--fallback-interval D]      watch session dirs continuously and ingest live (Ctrl+C to stop)
-  migrate-agents [--dry-run]          point Claude Code and Codex at kae instead of the old ctx MCP server`)
+  migrate-agents [--dry-run]          point Claude Code and Codex at kae instead of the old ctx MCP server
+  version                             print the version of this binary`)
 }
 
 // reorderFlagsFirst hoists any actual flag token in args whose name appears

@@ -16,7 +16,7 @@
 [Quick start](#quick-start) · [How it works](#how-it-works) · [Remote development](#remote-and-cloud-development) · [MCP tools](#tools) · [Commands](#commands) · [Privacy](#privacy) · [Limitations](#limitations) · [Contributing](CONTRIBUTING.md)
 
 ```
-go install -tags sqlite_fts5 github.com/danPoku/kaectx/cmd/kae@latest
+curl -fsSL https://raw.githubusercontent.com/danPoku/kaectx/master/install.sh | sh
 ```
 
 <sub>The command is <code>kae</code>. It was <code>ctx</code> up to v0.2.0; see <a href="#upgrading-from-ctx">Upgrading from ctx</a>.</sub>
@@ -86,14 +86,47 @@ want exactly what those articles show.
 
 ## Requirements
 
-- Go 1.27 or newer, and a C compiler (the SQLite driver and the vendored
-  sqlite-vec extension are built with cgo).
-- The `sqlite_fts5` build tag. Every build and test command below includes it.
+- Nothing, for a prebuilt binary: Linux (x86-64 or arm64), macOS (Apple Silicon
+  or Intel) or Windows (x86-64).
+- To build from source: Go 1.27 or newer, a C compiler (the SQLite driver and
+  the vendored sqlite-vec extension are built with cgo) and the `sqlite_fts5`
+  build tag. Every build and test command below includes it.
 - Optional, for semantic search: [Ollama](https://ollama.com) with the
   `nomic-embed-text` model. Without it kae falls back to keyword search and
   says so.
 
 ## Install
+
+Linux and macOS:
+
+```
+curl -fsSL https://raw.githubusercontent.com/danPoku/kaectx/master/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/danPoku/kaectx/master/install.ps1 | iex
+```
+
+Each script downloads the archive for your machine from the
+[latest release](https://github.com/danPoku/kaectx/releases/latest), checks it
+against the release's `SHA256SUMS`, and refuses to install on a mismatch. On
+Linux and macOS `kae` goes into `~/.local/bin`; on Windows into
+`%LOCALAPPDATA%\Programs\kae`, which is added to your user `PATH`. Set
+`KAE_INSTALL_DIR` to choose another folder, and `KAE_VERSION` (for example
+`v0.3.0`) to install a particular release. Run the script again to upgrade.
+`kae version` shows what is installed.
+
+The archives can also be downloaded by hand from the release page:
+`kae_linux_amd64.tar.gz`, `kae_linux_arm64.tar.gz`, `kae_darwin_arm64.tar.gz`,
+`kae_darwin_amd64.tar.gz` and `kae_windows_amd64.zip`. The binaries are not
+code-signed. On macOS, a binary downloaded with a browser is quarantined;
+clear that with `xattr -d com.apple.quarantine kae`, or use the script, which
+is not affected. The first release with prebuilt binaries is the one after
+v0.2.0; for v0.2.0 and earlier, build from source.
+
+### From source
 
 ```
 go install -tags sqlite_fts5 github.com/danPoku/kaectx/cmd/kae@latest
@@ -160,10 +193,10 @@ To move over:
 5. If you run the daemon as a service, rename the unit and point it at `kae`
    (see [Running it continuously](#running-it-continuously)).
 
-### Windows
+### Windows, from source
 
-Windows is fully supported, but SQLite and sqlite-vec require cgo and a
-MinGW-w64 compiler. From a clone, the checked-in installer discovers an MSYS2
+Building on Windows needs cgo and a MinGW-w64 compiler for SQLite and
+sqlite-vec. From a clone, the checked-in installer discovers an MSYS2
 UCRT64 or MinGW64 compiler, optionally runs the native test gate, creates a
 timestamped backup of the existing executables, and installs `kae.exe` and the
 deprecated `ctx.exe` alias into the Go bin directory:
@@ -187,7 +220,8 @@ installation and its `/home/<user>/.kae/kae.db`.
 ### macOS
 
 macOS is supported: every pull request is built and tested on Apple Silicon
-(`macos-latest`). cgo needs Apple's command-line compiler tools:
+(`macos-latest`). The install script above needs nothing else. Building from
+source needs Apple's command-line compiler tools for cgo:
 
 ```
 xcode-select --install
@@ -471,6 +505,7 @@ first_seq and last_seq rather than paging from the start.
 | `kae doctor` | Report the current project's sessions, embedding backlog, retrievals, outcomes, search outcomes, checkpoint checks (by level and by what the user did next) and handoff pickup (handoffs saved, and how many a note search returned within 7 days), plus database-wide source, ingest-error and unassigned-chunk counts. |
 | `kae mcp` | Serve MCP over stdio. Catches up on unread session logs in the background. |
 | `kae daemon` | Ingest and embed continuously. |
+| `kae version` | Print the version of this binary. |
 | `kae migrate-agents [--dry-run]` | Replace an old `ctx` MCP registration in Claude Code and Codex with `kae` (see [Upgrading from ctx](#upgrading-from-ctx)). |
 
 `kae project merge` exists because a session whose working directory has since
@@ -575,7 +610,7 @@ way.
 - On macOS the test suite runs in CI on Apple Silicon, but kae has not yet been
   checked there against real Claude Code and Codex logs, and Intel Macs are
   not in CI (see [macOS](#macos)).
-- There are no prebuilt binaries yet, so installing needs Go and a C compiler.
+- Prebuilt binaries are not code-signed or notarised.
 
 ## Development
 

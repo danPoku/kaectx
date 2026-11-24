@@ -1,0 +1,256 @@
+name: release
+
+# Builds the prebuilt binaries for a release, so installing kae does not need
+# Go or a C compiler.
+#
+# On a v* tag it builds five archives, smoke-tests each binary on its own
+# platform, and attaches them with SHA256SUMS to the GitHub release.
+#
+# On a pull request that touches this workflow or the install scripts it does
+# everything except publish, so a change here is tested before a tag depends
+# on it. A tag is permanent (CONTRIBUTING.md), so the first time this runs
+# must not be the release itself.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - install.sh
+      - install.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each target is built on a runner of that platform. cgo
+          # cross-compiling needs a C cross-toolchain per target; a native
+          # build needs none, and lets the binary be run where it was built.
+          - { goos: linux, goarch: amd64, runner: ubuntu-latest }
+          - { goos: linux, goarch: arm64, runner: ubuntu-24.04-arm }
+          - { goos: darwin, goarch: arm64, runner: macos-latest }
+          - { goos: darwin, goarch: amd64, runner: macos-15-intel }
+          - { goos: windows, goarch: amd64, runner: windows-latest }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: msys2/setup-msys2@v2
+        if: matrix.goos == 'windows'
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-gcc
+          path-type: inherit
+
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=v0.0.0-dev+${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Linux binaries are linked statically. A dynamically linked cgo binary
+      # needs a C library at least as new as the build machine's, so one
+      # built on today's Ubuntu would refuse to start on an older server.
+      # netgo and osusergo keep Go from calling the C library for DNS and
+      # user lookups, which is what makes a static glibc link safe.
+      - name: Build (Linux)
+        if: matrix.goos == 'linux'
+        env:
+          CGO_ENABLED: "1"
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist/pkg
+          for cmd in kae ctx; do
+            go build -trimpath -tags "sqlite_fts5 netgo osusergo" \
+              -ldflags "-s -w -X github.com/danPoku/kaectx/internal/cli.Version=${VERSION} -linkmode external -extldflags '-static'" \
+              -o "dist/pkg/${cmd}" "./cmd/${cmd}"
+          done
+
+      - name: Build (macOS)
+        if: matrix.goos == 'darwin'
+        env:
+          CGO_ENABLED: "1"
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist/pkg
+          for cmd in kae ctx; do
+            go build -trimpath -tags sqlite_fts5 \
+              -ldflags "-s -w -X github.com/danPoku/kaectx/internal/cli.Version=${VERSION}" \
+              -o "dist/pkg/${cmd}" "./cmd/${cmd}"
+          done
+
+      # Static here too, so kae.exe does not need MSYS2's runtime DLLs on the
+      # machine it is installed on.
+      - name: Build (Windows)
+        if: matrix.goos == 'windows'
+        shell: msys2 {0}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          export CC=gcc CGO_ENABLED=1
+          mkdir -p dist/pkg
+          for cmd in kae ctx; do
+            go build -trimpath -tags sqlite_fts5 \
+              -ldflags "-s -w -X github.com/danPoku/kaectx/internal/cli.Version=${VERSION} -extldflags '-static'" \
+              -o "dist/pkg/${cmd}.exe" "./cmd/${cmd}"
+          done
+
+      # Run the binary that was just built, on the platform it is for, against
+      # an empty home directory: create the database, ingest a real fixture
+      # log, and search it. This is the difference between "it compiled" and
+      # "it starts and finds something".
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -eu
+          export HOME="${RUNNER_TEMP}/home"
+          mkdir -p "$HOME" "${RUNNER_TEMP}/proj"
+          bin="${GITHUB_WORKSPACE}/dist/pkg"
+          fixture="${GITHUB_WORKSPACE}/internal/ingest/claudecode/testdata/session.jsonl"
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            export USERPROFILE="$(cygpath -w "$HOME")"
+            fixture="$(cygpath -w "$fixture")"
+          fi
+          # On Windows the binaries run with only the system folders on PATH:
+          # one that still needed MSYS2's runtime DLLs would fail to start.
+          run() {
+            if [ "${RUNNER_OS}" = "Windows" ]; then
+              PATH="/c/Windows/System32:/c/Windows" "$@"
+            else
+              "$@"
+            fi
+          }
+          cd "${RUNNER_TEMP}/proj"
+          run "$bin/kae" version
+          run "$bin/kae" init
+          run "$bin/kae" ingest --path "$fixture"
+          out="$(run "$bin/kae" search --all-projects "sqlite WAL")"
+          echo "$out"
+          echo "$out" | grep -q "claude-code"
+          run "$bin/ctx" version 2>&1 | grep -q "now called kae"
+
+      # Archive names carry no version, so that
+      # .../releases/latest/download/kae_linux_amd64.tar.gz always works and
+      # the install scripts need no API call to find the newest release.
+      - name: Archive
+        shell: bash
+        run: |
+          set -eu
+          cp LICENSE NOTICE README.md dist/pkg/
+          name="kae_${{ matrix.goos }}_${{ matrix.goarch }}"
+          cd dist/pkg
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            7z a -tzip "../${name}.zip" . >/dev/null
+          else
+            tar -czf "../${name}.tar.gz" .
+          fi
+          ls -l ..
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kae_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  # Checks the install scripts against the archives just built, served from a
+  # local folder: a good archive installs, and one whose bytes do not match
+  # SHA256SUMS is refused.
+  install-scripts:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        shell: bash
+        run: cd dist && (sha256sum kae_* 2>/dev/null || shasum -a 256 kae_*) > SHA256SUMS && cat SHA256SUMS
+
+      - name: install.sh installs a good archive and refuses a bad one
+        if: runner.os != 'Windows'
+        run: |
+          set -eu
+          export KAE_BASE_URL="file://${PWD}/dist"
+          export KAE_INSTALL_DIR="${RUNNER_TEMP}/bin"
+          sh install.sh
+          "${KAE_INSTALL_DIR}/kae" version
+          test ! -e "${KAE_INSTALL_DIR}/ctx"
+
+          # Corrupt every archive, keep the checksums: the script must stop.
+          for f in dist/kae_*; do echo tampered >> "$f"; done
+          export KAE_INSTALL_DIR="${RUNNER_TEMP}/bin2"
+          if sh install.sh; then
+            echo "install.sh accepted an archive with a wrong checksum" >&2
+            exit 1
+          fi
+          test ! -e "${KAE_INSTALL_DIR}/kae"
+
+      - name: install.ps1 installs a good archive and refuses a bad one
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:KAE_BASE_URL = (Resolve-Path dist).Path
+          $env:KAE_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'bin'
+          $env:KAE_NO_PATH_UPDATE = '1'
+          ./install.ps1
+          & (Join-Path $env:KAE_INSTALL_DIR 'kae.exe') version
+          if ($LASTEXITCODE -ne 0) { throw 'installed kae.exe did not run' }
+          if (Test-Path (Join-Path $env:KAE_INSTALL_DIR 'ctx.exe')) { throw 'ctx alias installed on a fresh machine' }
+
+          Get-ChildItem dist -Filter 'kae_*' | ForEach-Object { Add-Content -LiteralPath $_.FullName -Value 'tampered' }
+          $env:KAE_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'bin2'
+          $refused = $false
+          try { ./install.ps1 } catch { $refused = $true; Write-Host "refused: $_" }
+          if (-not $refused) { throw 'install.ps1 accepted an archive with a wrong checksum' }
+          if (Test-Path (Join-Path $env:KAE_INSTALL_DIR 'kae.exe')) { throw 'kae.exe installed despite the bad checksum' }
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [build, install-scripts]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum kae_* > SHA256SUMS && cat SHA256SUMS
+      # The release is created here if the maintainer has not created it yet,
+      # with generated notes as a placeholder; CONTRIBUTING.md has the step
+      # that replaces them with written ones. Either order works.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" dist/kae_* dist/SHA256SUMS --clobber
