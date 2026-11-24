@@ -157,6 +157,26 @@ func setup(o setupOptions) error {
 		changes = append(changes, got...)
 	}
 
+	// The session-start brief is optional: it puts text into every new
+	// session, which is the user's call. Each agent is asked once it is
+	// connected, and not asked again once it has the brief.
+	if hasClaude && !agentcfg.HasClaudeBriefHook(o.Home) &&
+		confirm("Claude Code: give each new session a short brief of past work in the project? (Adds a SessionStart hook to ~/.claude/settings.json; about 600 tokens per session.)") {
+		got, err := agentcfg.EnsureClaudeBriefHook(o.Home, o.Exe, o.DryRun)
+		if err != nil {
+			return err
+		}
+		changes = append(changes, got...)
+	}
+	if hasCodex && !agentcfg.HasCodexBriefInstruction(o.Home) &&
+		confirm("Codex: ask it to fetch that brief at the start of each session? (Adds a short instruction to ~/.codex/AGENTS.md.)") {
+		got, err := agentcfg.EnsureCodexBriefInstruction(o.Home, o.DryRun)
+		if err != nil {
+			return err
+		}
+		changes = append(changes, got...)
+	}
+
 	if o.DryRun {
 		say("would create the database if needed and ingest existing session logs")
 	} else {

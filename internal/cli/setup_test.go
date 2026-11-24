@@ -225,8 +225,10 @@ func TestSetupAsksBeforeOptionalChanges(t *testing.T) {
 		wantApprove, wantSvc bool
 	}{
 		{"no answers", "", false, false},
-		{"yes to approval, no to the daemon", "y\nn\n", true, false},
-		{"no to approval, yes to the daemon", "n\nyes\n", false, true},
+		// The questions come in this order: Codex approval, Claude Code
+		// brief, Codex brief, daemon.
+		{"yes to approval, no to the rest", "y\nn\nn\nn\n", true, false},
+		{"yes to the daemon only", "n\nn\nn\nyes\n", false, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

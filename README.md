@@ -9,7 +9,7 @@
 [![Release](https://img.shields.io/github/v/release/danPoku/kaectx?label=release&color=2ea44f)](https://github.com/danPoku/kaectx/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/danPoku/kaectx/test.yml?branch=master&label=CI)](https://github.com/danPoku/kaectx/actions/workflows/test.yml)
 [![Go](https://img.shields.io/github/go-mod/go-version/danPoku/kaectx?logo=go&logoColor=white)](go.mod)
-[![MCP](https://img.shields.io/badge/MCP-12%20tools-6f42c1)](#tools)
+[![MCP](https://img.shields.io/badge/MCP-14%20tools-6f42c1)](#tools)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20WSL2%20%7C%20macOS%20%7C%20Windows-0969da)](#install)
 [![License](https://img.shields.io/github/license/danPoku/kaectx?color=yellow)](LICENSE)
 
@@ -471,6 +471,52 @@ same table. Interactive Codex asks instead.
 Agents that were already running keep the old `kae mcp` process until you start
 a new chat.
 
+### The session-start brief
+
+An agent only gets past context if it decides to search. The brief removes
+that step: when a session starts in a project kae knows, the agent is handed a
+short summary of what was done there before, by any agent.
+
+```
+$ kae brief
+kae brief: api (about 212 of 600 tokens)
+Past work in this project, from every agent. Each line gives the kae tool call that opens it.
+
+Latest handoff (note 13, 2026-11-23, saved by claude-code): Handoff: token race
+  Mutex added around refresh. Next: add the regression test for two concurrent refreshes.
+
+Recent sessions:
+- 2026-11-23 claude-code: Fix the refresh token race [internal/auth/token.go]  get_session(session_id="claude-code:91ae…")
+- 2026-11-22 codex: Add rate limiting to the login route [internal/http/login.go]  get_session(session_id="codex:0c2f…")
+
+Most-changed files, last 7 days:
+- internal/auth/token.go (4)  explain_file(path="internal/auth/token.go")
+```
+
+It holds the newest handoff note, the five most recent sessions with the files
+they changed, and the files changed most in the past week. It is built only
+from stored titles, notes, paths and dates, with no model involved. It never
+exceeds its budget (600 tokens by default, `--budget N` to change it; a token
+is counted as four characters), and the header states what it used. A project
+with no history gets nothing at all.
+
+`kae setup` offers to switch it on for each agent:
+
+- **Claude Code**: a `SessionStart` hook in `~/.claude/settings.json` that runs
+  `kae brief --hook`; Claude Code adds what it prints to the new session. The
+  other settings and hooks in the file are kept, in their order, with a copy
+  left as `settings.json.kae-backup`. The hook runs on every kind of session
+  start, so a resumed session receives the brief again.
+- **Codex**: a short instruction in `~/.codex/AGENTS.md`, between
+  `<!-- kae:brief:start -->` and `<!-- kae:brief:end -->`, asking Codex to call
+  the `get_brief` tool at the start of a session. Codex has session-start
+  hooks too (checked on codex-cli 0.147), but a hook there has to be reviewed
+  and trusted inside Codex before it runs, which kae cannot do for you.
+
+To remove it, delete that hook entry or that block. A handoff delivered in a
+brief, by the hook or by `get_brief`, counts as picked up in `kae doctor`;
+`kae brief` typed by hand does not.
+
 ### Tools
 
 | Tool | What it does |
@@ -485,6 +531,7 @@ a new chat.
 | `search_notes` | Searches saved notes. Returns current notes only; a note retired with `supersedes` is kept as history but not returned. Each call that returns notes is recorded, with the notes it returned in rank order, under the `run_id` in the result. A note whose source is known also carries `session_id`, `anchor_seq` (the first message of the exchange it was saved in) and `next_step`, the call that opens that exchange; all three are absent when the source is unknown. |
 | `record_retrieval_outcome` | Labels retrieved evidence as helpful, unhelpful, stale, incorrect or superseded. Pass the exact search run ID and rank returned by `search_context` or `get_chunk`. A label on a hit from another project counts toward that project's evidence, not the caller's. |
 | `record_search_outcome` | Records whether a search as a whole answered the question (helpful, partial or unhelpful) and, when it fell short, why (`wrong_project`, `not_indexed`, `stale_state`, `ranking`). Pass the search's run ID. Meant for every search: one answered by its snippets alone, with nothing opened, is `helpful`. Never changes a result's reliability; a second call for the same search replaces the first. |
+| `get_brief` | Returns the session-start brief for this project: the latest handoff note, recent sessions with the files they changed, and the files changed most in the past week, within a token `budget` (default 600). `text` is empty for a project with no history. Meant to be called once at the start of a session by an agent that was not given the brief by a hook. A handoff it includes is named in `handoff_note_id` and recorded as picked up. |
 | `checkpoint_status` | Assesses the latest session's message count, active time and file breadth. Active time (`duration_minutes`) is the sum of the gaps between consecutive messages, leaving out gaps over 30 minutes, so a session resumed days later is not days long. When a threshold is reached the level is `checkpoint_recommended`, and `checkpoint_strongly_recommended` only once an urgent threshold is crossed; the agent is instructed to offer a durable handoff and a fresh session, and kae never switches or ends the session automatically. Every check is stored, healthy ones included, one row per session. Pass `session_id` to assess a specific session. `pending_feedback` lists up to 10 opened results still waiting for an outcome, and `pending_searches` up to 10 searches served by this `kae mcp` process that have no whole-search outcome yet. |
 | `feedback_status` | Returns a bounded inbox of checkpoint decisions and opened retrievals that still need an explicit outcome. It identifies missing feedback; it does not guess whether context was helpful. `pending_searches` lists this `kae mcp` process's own searches with no whole-search outcome yet, under the same limit; another agent's searches are never listed. |
 | `record_checkpoint_outcome` | Records whether the user started a new session, saved a handoff, continued, or dismissed a checkpoint recommendation. After a healthy check only `continued` can be recorded. With `saved_handoff`, pass `note_id` (the ID `save_note` returned for the handoff, a note in this project) so `kae doctor` can report whether a later note search returned it. |
@@ -581,6 +628,7 @@ first_seq and last_seq rather than paging from the start.
 | `kae embed [--batch N]` | Embed pending chunks through Ollama. |
 | `kae search <query> [--agent A] [--limit N] [--since D] [--until D] [--risk-aware] [--all-projects]` | Search the current project, or every project with `--all-projects`. `--risk-aware` reranks using recorded retrieval outcomes. Output starts with the search's run ID and numbers each hit. |
 | `kae feedback <run_id> <rank> <outcome> [--note TEXT]` | Label a `kae search` hit as helpful, unhelpful, stale, incorrect or superseded, the CLI counterpart of `record_retrieval_outcome`. A second label for the same hit replaces the first. |
+| `kae brief [--budget N] [--hook]` | Print the session-start brief for the current project. `--hook` is for an agent's session-start hook: it records the delivery, and never fails or prints an error. |
 | `kae explain <path> [--limit N]` | Show sessions, actions and git span for a project-relative file. |
 | `kae repair git\|touches\|messages\|projects\|notes [--dry-run]` | Bring data ingested by older versions up to date (see [Quick start](#quick-start)). |
 | `kae project list` | Show projects, their remotes, session counts and known paths. |
